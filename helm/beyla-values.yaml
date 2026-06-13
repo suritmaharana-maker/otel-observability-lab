@@ -1,0 +1,46 @@
+# Grafana Beyla 3.12.x Helm values
+# Phase 1: stub only — activated in Phase 2
+# Beyla provides zero-code L7 eBPF spans with W3C traceparent propagation
+
+preset: network
+
+# CRITICAL: cgroup mount required for context propagation in Python/FastAPI
+# Without this, Beyla generates its own trace IDs instead of inheriting app's
+extraVolumes:
+  - name: cgroup
+    hostPath:
+      path: /sys/fs/cgroup
+
+extraVolumeMounts:
+  - name: cgroup
+    mountPath: /sys/fs/cgroup
+
+# OTel export — points to local OTel Collector agent
+env:
+  BEYLA_OPEN_PORT: "8000,8001,8002"           # gateway, product-svc, llm-svc
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otelcol-agent.observability.svc.cluster.local:4317"
+  OTEL_SERVICE_NAME: "beyla-ebpf"
+  BEYLA_TRACE_PRINTER: "disabled"             # don't print to stdout in prod
+
+# Exclude the OTel Collector itself from instrumentation
+discovery:
+  services:
+    - exe_path_regexp: ".*otelcol.*"
+      skip: true
+
+# Resource limits
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 64Mi
+
+# Must run as DaemonSet on every node
+daemonset:
+  enabled: true
+
+# Privileged required for eBPF
+securityContext:
+  privileged: true

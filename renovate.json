@@ -1,0 +1,32 @@
+{
+  "extends": ["config:base"],
+  "packageRules": [
+    {
+      "matchPackagePatterns": ["opentelemetry"],
+      "groupName": "opentelemetry",
+      "automerge": false,
+      "labels": ["dependencies", "opentelemetry"]
+    },
+    {
+      "matchPackagePatterns": ["traceloop"],
+      "groupName": "openllmetry",
+      "automerge": false,
+      "labels": ["dependencies", "openllmetry"]
+    },
+    {
+      "matchPackagePatterns": ["cilium"],
+      "groupName": "cilium",
+      "automerge": false,
+      "labels": ["dependencies", "cilium"]
+    },
+    {
+      "matchPackagePatterns": ["beyla"],
+      "groupName": "beyla",
+      "automerge": false,
+      "labels": ["dependencies", "beyla"]
+    }
+  ],
+  "terraform": { "enabled": true },
+  "helm-values": { "enabled": true },
+  "pip_requirements": { "enabled": true }
+}

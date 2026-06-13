@@ -1,0 +1,67 @@
+# Cilium 1.19.4 Helm values for AWS EKS ENI mode
+# Source: https://docs.cilium.io/en/stable/installation/k8s-install-helm/
+#
+# ENI mode is the RECOMMENDED installation method for EKS.
+# Cilium manages ENIs and IP allocation in place of the AWS VPC CNI.
+# The aws-node DaemonSet must be deleted BEFORE nodes join (done in Terraform).
+
+# ── ENI / IPAM ────────────────────────────────────────────────────────────────
+# ENI mode: Cilium allocates fully-routable AWS VPC IP addresses per pod
+eni:
+  enabled: true
+
+ipam:
+  mode: eni
+
+# Disable tunnel — ENI mode uses native VPC routing (no overlay)
+routingMode: native
+
+# Required for ENI mode: Cilium handles masquerading
+bpf:
+  masquerade: true
+
+# ── NODE TAINT MANAGEMENT ─────────────────────────────────────────────────────
+# Cilium automatically removes node.cilium.io/agent-not-ready taint
+# once it has fully initialised on each node.
+# This pairs with the taint set on the EKS node group in Terraform.
+removeNodeTaints: true
+setNodeTaints: true
+
+# ── KUBE PROXY REPLACEMENT ───────────────────────────────────────────────────
+# Partial replacement — safe default for EKS without removing kube-proxy
+kubeProxyReplacement: false
+
+# ── HUBBLE — NETWORK OBSERVABILITY ───────────────────────────────────────────
+# Enabled here so it's ready for Phase 2 instrumentation
+# Hubble provides L3/L4 flow metrics via Prometheus scrape
+hubble:
+  enabled: true
+  relay:
+    enabled: true
+  ui:
+    enabled: false    # Enable manually if you want the UI
+  metrics:
+    enabled:
+      - dns
+      - drop
+      - tcp
+      - flow
+      - port-distribution
+      - icmp
+      - httpV2:exemplars=true;labelsContext=source_ip,source_namespace,source_workload,destination_ip,destination_namespace,destination_workload,traffic_direction
+    serviceMonitor:
+      enabled: false  # Enable in Phase 2 when Prometheus is installed
+
+# ── OPERATOR ─────────────────────────────────────────────────────────────────
+operator:
+  replicas: 1    # Sufficient for lab; use 2 in production
+
+# ── RESOURCES ─────────────────────────────────────────────────────────────────
+# Sized for t3.xlarge nodes (4 vCPU, 16GB RAM)
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi

@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  terraform-validate:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.2"
+
+      - name: Terraform Init (EKS)
+        run: terraform -chdir=terraform/eks init -backend=false
+
+      - name: Terraform Validate (EKS)
+        run: terraform -chdir=terraform/eks validate
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive terraform/
+
+  helm-lint:
+    name: Helm Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "v4.2.1"
+
+      - name: Add Helm repos
+        run: |
+          helm repo add cilium https://helm.cilium.io
+          helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+          helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo update
+
+      - name: Lint Cilium values
+        run: |
+          helm lint cilium/cilium --version 1.19.4 -f helm/cilium-values.yaml
+
+      - name: Lint OTel Collector values
+        run: |
+          helm lint open-telemetry/opentelemetry-collector -f helm/otelcol-values.yaml
+
+      - name: Dry-run Cilium template
+        run: |
+          helm template cilium cilium/cilium --version 1.19.4 \
+            -f helm/cilium-values.yaml \
+            --dry-run > /dev/null
+
+  python-lint:
+    name: Python Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install linting tools
+        run: pip install ruff==0.9.10
+
+      - name: Lint gateway
+        run: ruff check apps/gateway/
+
+      - name: Lint product-svc
+        run: ruff check apps/product-svc/
+
+      - name: Lint llm-svc
+        run: ruff check apps/llm-svc/
+
+  docker-build:
+    name: Docker Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build gateway image
+        run: docker build -t otel-lab-gateway:ci apps/gateway/
+
+      - name: Build product-svc image
+        run: docker build -t otel-lab-product-svc:ci apps/product-svc/
+
+      - name: Build llm-svc image
+        run: docker build -t otel-lab-llm-svc:ci apps/llm-svc/

@@ -1,0 +1,14 @@
+# ── Phase 1 — runtime only ────────────────────────────────────────────────────
+fastapi==0.115.12
+uvicorn[standard]==0.34.3
+httpx==0.28.1
+pydantic==2.11.4
+
+# ── Phase 2 — uncomment when adding OTel instrumentation ─────────────────────
+# RULE: SDK and contrib MUST be from the same release cycle. Never mix.
+# SDK 1.42.1  ←→  contrib 0.63b1  (verified June 2026, PyPI)
+# opentelemetry-api==1.42.1
+# opentelemetry-sdk==1.42.1
+# opentelemetry-exporter-otlp-proto-grpc==1.42.1
+# opentelemetry-instrumentation-fastapi==0.63b1
+# opentelemetry-semantic-conventions==0.63b1
