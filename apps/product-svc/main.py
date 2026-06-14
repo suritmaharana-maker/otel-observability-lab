@@ -1,47 +1,46 @@
 """
-Product Service — Phase 1 skeleton
-Serves product catalog from PostgreSQL
-OTel instrumentation + psycopg2 tracing added in Phase 2
+Product Service - Phase 2 - OTel SDK instrumented
 """
 import os
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
+from opentelemetry.propagate import set_global_textmap
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+
 import psycopg2
 import psycopg2.extras
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 
-app = FastAPI(
-    title="OTel Lab — Product Service",
-    version="0.1.0",
-    description="Product catalog service for the OTel Observability Lab",
-)
+OTEL_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otelcol.observability.svc.cluster.local:4317")
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://otellab:otellab@postgres:5432/otellab"
-)
+resource = Resource.create({
+    "service.name": "product-svc",
+    "service.version": "0.2.0",
+    "deployment.environment": "lab",
+    "cloud.provider": "aws",
+    "cloud.region": "us-east-2",
+})
 
+provider = TracerProvider(resource=resource)
+provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=OTEL_ENDPOINT, insecure=True)))
+trace.set_tracer_provider(provider)
+set_global_textmap(TraceContextTextMapPropagator())
+Psycopg2Instrumentor().instrument()
 
-def get_db():
-    """Get a database connection"""
-    conn = psycopg2.connect(DATABASE_URL)
-    try:
-        yield conn
-    finally:
-        conn.close()
+app = FastAPI(title="OTel Lab - Product Service", version="0.2.0")
+FastAPIInstrumentor.instrument_app(app)
 
-
-class Product(BaseModel):
-    id: Optional[int] = None
-    name: str
-    description: str
-    price: float
-    category: str
-
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://otellab:otellab@postgres:5432/otellab")
 
 @app.on_event("startup")
 async def startup():
-    """Create tables and seed data on startup"""
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
     cur.execute("""
@@ -54,7 +53,6 @@ async def startup():
             created_at TIMESTAMP DEFAULT NOW()
         )
     """)
-    # Seed with sample data if empty
     cur.execute("SELECT COUNT(*) FROM products")
     count = cur.fetchone()[0]
     if count == 0:
@@ -73,15 +71,19 @@ async def startup():
     cur.close()
     conn.close()
 
+class Product(BaseModel):
+    id: Optional[int] = None
+    name: str
+    description: str
+    price: float
+    category: str
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "product-svc", "version": "0.1.0"}
-
+    return {"status": "ok", "service": "product-svc", "version": "0.2.0"}
 
 @app.get("/products", response_model=List[Product])
 async def list_products():
-    """List all products from PostgreSQL"""
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
@@ -94,10 +96,8 @@ async def list_products():
         cur.close()
         conn.close()
 
-
 @app.get("/products/{product_id}", response_model=Product)
 async def get_product(product_id: int):
-    """Get a single product by ID"""
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
@@ -112,7 +112,6 @@ async def get_product(product_id: int):
     finally:
         cur.close()
         conn.close()
-
 
 if __name__ == "__main__":
     import uvicorn
