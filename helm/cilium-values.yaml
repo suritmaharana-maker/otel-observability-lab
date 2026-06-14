@@ -1,45 +1,51 @@
 # Cilium 1.19.4 Helm values for AWS EKS ENI mode
-# Source: docs.cilium.io/en/stable/installation/k8s-install-helm/
+# Source: cilium.io/blog/2025/06/19/eks-eni-install/
 #
 # ENI mode: Cilium manages ENIs and IP allocation in place of AWS VPC CNI.
 # aws-node DaemonSet is patched with a non-matching nodeSelector before this
-# installs — preventing ENI management conflicts.
+# installs - preventing ENI management conflicts.
 
-# ── ENI / IPAM ────────────────────────────────────────────────────────────────
+# Required: EKS API server endpoint (without https://)
+# Cilium cannot reach k8s API before networking is initialised without this
+# Source: cilium.io/blog/2025/06/19/eks-eni-install/
+k8sServiceHost: 99B389CBB5B02A44A96D570AA7358F4E.gr7.us-east-2.eks.amazonaws.com
+k8sServicePort: 443
+
+# ENI / IPAM
 eni:
   enabled: true
 
 ipam:
   mode: eni
 
-# Native routing — no overlay encapsulation, uses VPC routing directly
+# Native routing - no overlay encapsulation, uses VPC routing directly
 routingMode: native
 
-# Required for ENI mode
+# Required for ENI mode - must be explicit alongside bpf.masquerade
+# Source: confirmed from Cilium agent error logs
+enableIPv4Masquerade: true
+
 bpf:
   masquerade: true
 
-# ── NODE TAINT MANAGEMENT ─────────────────────────────────────────────────────
+# Node taint management
 # Cilium removes node.cilium.io/agent-not-ready taint automatically
-# once it has fully initialised on each node.
 removeNodeTaints: true
 setNodeTaints: true
 
-# ── KUBE PROXY REPLACEMENT ───────────────────────────────────────────────────
+# Kube proxy replacement
 # false = safe default for EKS; kube-proxy addon handles service routing
 kubeProxyReplacement: false
 
-# ── OPERATOR ─────────────────────────────────────────────────────────────────
+# Operator
 operator:
   replicas: 1
-  # Disable aggressive restart of unmanaged pods (e.g. CoreDNS).
-  # Source: medium.com/@pavankumarn6997 — prevents CoreDNS restart loops
-  # when Cilium operator starts before CoreDNS has Cilium networking.
+  # Disable aggressive restart of unmanaged pods (e.g. CoreDNS)
   unmanagedPodWatcher:
     restart: false
 
-# ── HUBBLE — NETWORK OBSERVABILITY ───────────────────────────────────────────
-# Enabled now so Phase 2 instrumentation requires no cluster changes.
+# Hubble - network observability
+# Enabled now so Phase 2 requires no cluster changes
 hubble:
   enabled: true
   relay:
@@ -58,8 +64,7 @@ hubble:
     serviceMonitor:
       enabled: false
 
-# ── RESOURCES ─────────────────────────────────────────────────────────────────
-# Sized for t3.xlarge nodes (4 vCPU, 16GB RAM)
+# Resources - sized for t3.xlarge nodes (4 vCPU, 16GB RAM)
 resources:
   limits:
     cpu: 500m
