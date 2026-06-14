@@ -16,7 +16,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.15.2"
+          terraform_version: "1.15.6"
 
       - name: Terraform Init (EKS)
         run: terraform -chdir=terraform/eks init -backend=false
