@@ -14,14 +14,11 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = "~> 2.36.0"
     }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.0"
+    }
   }
-
-  # Uncomment after creating S3 bucket for remote state
-  # backend "s3" {
-  #   bucket = "otel-lab-tfstate-suritm7543"
-  #   key    = "eks/terraform.tfstate"
-  #   region = "us-east-2"
-  # }
 }
 
 provider "aws" {
@@ -30,7 +27,7 @@ provider "aws" {
   default_tags {
     tags = {
       Project     = "otel-observability-lab"
-      Owner       = "suritm7543"
+      Owner       = "suritmaharana-maker"
       Environment = var.environment
       ManagedBy   = "terraform"
     }
@@ -74,7 +71,6 @@ data "aws_availability_zones" "available" {
 }
 
 # ── VPC ───────────────────────────────────────────────────────────────────────
-# VPC module v6.6.1 — verified latest as of June 2026
 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
@@ -88,11 +84,10 @@ module "vpc" {
   public_subnets  = var.public_subnet_cidrs
 
   enable_nat_gateway   = true
-  single_nat_gateway   = true # cost optimisation for lab; use one per AZ in prod
+  single_nat_gateway   = true
   enable_dns_hostnames = true
   enable_dns_support   = true
 
-  # Required tags for EKS load balancer controller to discover subnets
   public_subnet_tags = {
     "kubernetes.io/role/elb"                    = 1
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
@@ -104,42 +99,40 @@ module "vpc" {
 }
 
 # ── EKS CLUSTER ───────────────────────────────────────────────────────────────
-# EKS module v21.x — required for AWS provider 6.x compatibility
+# CRITICAL: addons block is intentionally EMPTY.
 #
-# CRITICAL: vpc_cni is NOT in cluster_addons.
-# Cilium replaces the VPC CNI in ENI mode. Installing both causes split-brain.
-# The aws-node DaemonSet will be deleted after Cilium is installed (see null_resource below).
+# Reason: The EKS module v21 waits for addons to reach ACTIVE state immediately
+# after cluster creation — before any nodes exist. CoreDNS requires nodes to
+# schedule on. With Cilium replacing the VPC CNI there is no Fargate fallback.
+# Result: 20-minute timeout then failure. This was the root cause of the first
+# failed apply.
+#
+# Fix: CoreDNS and kube-proxy are installed as standalone aws_eks_addon resources
+# below, with explicit depends_on = [aws_eks_node_group.main]. This guarantees
+# nodes exist before addons are installed.
+# Source: github.com/terraform-aws-modules/terraform-aws-eks issue #2585
+#         hackmd.io/@eCHO-live/138 (confirmed working pattern)
 
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 21.0"
 
   name               = var.cluster_name
-  kubernetes_version = "1.35" # argument renamed from cluster_version in v21
+  kubernetes_version = "1.35"
 
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
 
   endpoint_public_access = true
 
-  # v21 uses access entries instead of aws-auth ConfigMap
   enable_cluster_creator_admin_permissions = true
 
-  # CRITICAL: Keep node groups EMPTY here.
-  # We create the node group as a separate resource below so we can enforce
-  # depends_on = [helm_release.cilium] — the #1 EKS+Cilium failure mode prevention.
+  # Node groups managed outside this module — see aws_eks_node_group below
   eks_managed_node_groups = {}
 
-  # Only install addons that don't conflict with Cilium
-  # vpc-cni is intentionally excluded — Cilium is the CNI in ENI mode
-  addons = {
-    coredns = {
-      most_recent = true
-    }
-    kube-proxy = {
-      most_recent = true
-    }
-  }
+  # INTENTIONALLY EMPTY — addons installed after nodes join
+  # See standalone aws_eks_addon resources below
+  addons = {}
 }
 
 # ── IAM ROLE FOR NODE GROUP ───────────────────────────────────────────────────
@@ -168,10 +161,37 @@ resource "aws_iam_role_policy_attachment" "node_group_policies" {
   policy_arn = each.value
 }
 
-# ── CILIUM — MUST INSTALL BEFORE NODE GROUP JOINS ─────────────────────────────
-# This is the single most critical sequencing constraint in the project.
-# Cilium must be present when nodes first join so they initialise with the
-# correct CNI. Installing Cilium after nodes join = split-brain CNI state.
+# ── PATCH aws-node BEFORE CILIUM ─────────────────────────────────────────────
+# Source: docs.cilium.io/en/stable + egrosdou01.github.io/personal-blog
+#
+# Patching aws-node with a node selector that no node will ever match
+# effectively disables it without deleting it. This is safer than deletion:
+# - Idempotent: can be run multiple times without error
+# - Reversible: can be re-enabled by removing the node selector
+# - Official Cilium recommendation for ENI mode on EKS
+#
+# Must run BEFORE Cilium installs so ENI management does not conflict.
+
+resource "null_resource" "patch_aws_node" {
+  triggers = {
+    cluster_name = module.eks.cluster_name
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name}
+      kubectl -n kube-system patch daemonset aws-node \
+        --type='strategic' \
+        -p='{"spec":{"template":{"spec":{"nodeSelector":{"io.cilium/aws-node-enabled":"true"}}}}}'
+    EOT
+  }
+
+  depends_on = [module.eks]
+}
+
+# ── CILIUM — INSTALLS BEFORE NODE GROUP ───────────────────────────────────────
+# Must depend on patch_aws_node so aws-node is disabled before Cilium starts
+# managing ENIs. Node group depends on this resource — enforcing correct order.
 
 resource "helm_release" "cilium" {
   name             = "cilium"
@@ -182,42 +202,16 @@ resource "helm_release" "cilium" {
   create_namespace = false
 
   wait    = true
-  timeout = 600 # 10 minutes — Cilium can take a few minutes to be fully ready
+  timeout = 600
 
   values = [file("${path.module}/../../helm/cilium-values.yaml")]
 
-  # Cluster must exist, but NO nodes yet
-  depends_on = [module.eks]
+  depends_on = [null_resource.patch_aws_node]
 }
 
-# ── DELETE aws-node DaemonSet AFTER CILIUM INSTALLS ──────────────────────────
-# In ENI mode, Cilium fully replaces the AWS VPC CNI.
-# The aws-node DaemonSet conflicts with Cilium's ENI management.
-# Must be removed AFTER Cilium is running, BEFORE nodes join.
-
-resource "null_resource" "delete_aws_node" {
-  triggers = {
-    cluster_name = module.eks.cluster_name
-  }
-
-  provisioner "local-exec" {
-    command = <<-EOT
-      aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name}
-      kubectl -n kube-system delete daemonset aws-node --ignore-not-found=true
-    EOT
-  }
-
-  depends_on = [helm_release.cilium]
-}
-
-# ── EKS NODE GROUP — AFTER CILIUM AND aws-node DELETION ──────────────────────
-# CRITICAL: depends_on both Cilium AND the aws-node deletion.
-# Nodes join AFTER Cilium is ready and aws-node is gone.
-#
-# CRITICAL: The node taint node.cilium.io/agent-not-ready=true:NoExecute
-# is REQUIRED by Cilium 1.19 docs. It prevents app pods from scheduling
-# before Cilium has fully initialised networking on the node.
-# Cilium automatically removes this taint once it is ready on each node.
+# ── EKS NODE GROUP — AFTER CILIUM ────────────────────────────────────────────
+# Nodes join AFTER Cilium is ready. Cilium removes the agent-not-ready taint
+# automatically once it has initialised on each node.
 
 resource "aws_eks_node_group" "main" {
   cluster_name    = module.eks.cluster_name
@@ -240,8 +234,8 @@ resource "aws_eks_node_group" "main" {
   # AL2023 ships Linux kernel 6.1 — fully compatible with Cilium 1.19.4 eBPF
   ami_type = "AL2023_x86_64_STANDARD"
 
-  # REQUIRED by Cilium 1.19 docs for EKS managed node groups
-  # Cilium removes this taint automatically once it is ready on the node
+  # Required by Cilium 1.19 docs for EKS managed node groups
+  # Cilium removes this taint automatically once ready on each node
   taint {
     key    = "node.cilium.io/agent-not-ready"
     value  = "true"
@@ -253,12 +247,41 @@ resource "aws_eks_node_group" "main" {
   }
 
   depends_on = [
-    null_resource.delete_aws_node,
+    helm_release.cilium,
     aws_iam_role_policy_attachment.node_group_policies,
   ]
 }
 
-# ── NAMESPACES ────────────────────────────────────────────────────────────────
+# ── COREDNS ADDON — AFTER NODES JOIN ─────────────────────────────────────────
+# CRITICAL: depends_on = [aws_eks_node_group.main]
+# This is the fix for the CoreDNS DEGRADED timeout failure.
+# CoreDNS requires nodes to schedule on. Installing it before nodes exist
+# causes a 20-minute timeout then failure.
+# Source: github.com/terraform-aws-modules/terraform-aws-eks/issues/2585
+
+resource "aws_eks_addon" "coredns" {
+  cluster_name                = module.eks.cluster_name
+  addon_name                  = "coredns"
+  most_recent                 = true
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  depends_on = [aws_eks_node_group.main]
+}
+
+# ── KUBE-PROXY ADDON — AFTER NODES JOIN ──────────────────────────────────────
+
+resource "aws_eks_addon" "kube_proxy" {
+  cluster_name                = module.eks.cluster_name
+  addon_name                  = "kube-proxy"
+  most_recent                 = true
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  depends_on = [aws_eks_node_group.main]
+}
+
+# ── NAMESPACES — AFTER NODES AND ADDONS ──────────────────────────────────────
 
 resource "kubernetes_namespace" "observability" {
   metadata {
@@ -267,7 +290,10 @@ resource "kubernetes_namespace" "observability" {
       "app.kubernetes.io/managed-by" = "terraform"
     }
   }
-  depends_on = [aws_eks_node_group.main]
+  depends_on = [
+    aws_eks_addon.coredns,
+    aws_eks_addon.kube_proxy,
+  ]
 }
 
 resource "kubernetes_namespace" "otel_lab" {
@@ -277,5 +303,8 @@ resource "kubernetes_namespace" "otel_lab" {
       "app.kubernetes.io/managed-by" = "terraform"
     }
   }
-  depends_on = [aws_eks_node_group.main]
+  depends_on = [
+    aws_eks_addon.coredns,
+    aws_eks_addon.kube_proxy,
+  ]
 }

@@ -18,6 +18,11 @@ jobs:
         with:
           terraform_version: "1.15.6"
 
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: "v1.35.0"
+
       - name: Terraform Init (EKS)
         run: terraform -chdir=terraform/eks init -backend=false
 
@@ -45,15 +50,18 @@ jobs:
           helm repo add grafana https://grafana.github.io/helm-charts
           helm repo update
 
-      - name: Lint Cilium values
+      - name: Dry-run Cilium template
         run: |
-          helm pull cilium/cilium --version 1.19.4 --untar --untardir /tmp/cilium-chart
-          helm lint /tmp/cilium-chart/cilium -f helm/cilium-values.yaml
+          helm template cilium cilium/cilium \
+            --version 1.19.4 \
+            -f helm/cilium-values.yaml \
+            --dry-run > /dev/null
 
-      - name: Lint OTel Collector values
+      - name: Dry-run OTel Collector template
         run: |
-          helm pull open-telemetry/opentelemetry-collector --untar --untardir /tmp/otelcol-chart
-          helm lint /tmp/otelcol-chart/opentelemetry-collector -f helm/otelcol-values.yaml
+          helm template otelcol open-telemetry/opentelemetry-collector \
+            -f helm/otelcol-values.yaml \
+            --dry-run > /dev/null
 
   python-lint:
     name: Python Lint
