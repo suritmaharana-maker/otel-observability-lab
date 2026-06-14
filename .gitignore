@@ -1,9 +1,9 @@
 # Terraform
 **/.terraform/
+!**/.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 *.tfplan
-.terraform.lock.hcl
 override.tf
 override.tf.json
 *_override.tf
