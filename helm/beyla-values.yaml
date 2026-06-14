@@ -1,31 +1,34 @@
 # Grafana Beyla 3.20.0 — Helm chart 1.16.8
-# eBPF L7 autoinstrumentation for otel-lab namespace
-# Kernel 6.12.90 — TCX mode — no Cilium conflict
-# Source: grafana.com/docs/beyla/latest/cilium-compatibility/
+# EKS — kernel 6.12.90 — TCX mode
+# privileged: true REQUIRED for eBPF on Kubernetes
+# Source: grafana.com/docs/beyla/latest/setup/kubernetes/
 
 image:
   repository: grafana/beyla
   tag: "3.20.0"
   pullPolicy: IfNotPresent
 
-# DaemonSet — one Beyla per node
 daemonset:
   enabled: true
 
-# Required capabilities for eBPF
 securityContext:
-  privileged: false
+  privileged: true
+  runAsUser: 0
+  allowPrivilegeEscalation: true
+  readOnlyRootFilesystem: false
   capabilities:
     add:
-      - CAP_DAC_READ_SEARCH
-      - CAP_SYS_PTRACE
-      - CAP_PERFMON
-      - CAP_BPF
-      - CAP_CHECKPOINT_RESTORE
-      - CAP_NET_RAW
-
-# Required host access for eBPF
-preset: ""
+      - BPF
+      - SYS_PTRACE
+      - NET_RAW
+      - CHECKPOINT_RESTORE
+      - DAC_READ_SEARCH
+      - PERFMON
+      - SYS_RESOURCE
+      - SYS_ADMIN
+      - NET_ADMIN
+    drop:
+      - ALL
 
 hostPID: true
 
@@ -42,26 +45,19 @@ config:
         enable: true
         cluster_name: "otel-lab"
 
-    # Instrument only otel-lab namespace
     discovery:
-      services:
+      instrument:
         - k8s_namespace: "otel-lab"
 
-    # W3C traceparent propagation — correlates with OTel SDK spans
     ebpf:
       enable_context_propagation: true
       traffic_control_backend: tcx
 
-    # OTLP export to our Collector
     otel_traces_export:
       endpoint: "http://otelcol.observability.svc.cluster.local:4317"
 
     otel_metrics_export:
       endpoint: "http://otelcol.observability.svc.cluster.local:4317"
-
-    # RED metrics — Rate, Errors, Duration per service
-    prometheus_export:
-      enabled: false
 
     routes:
       unmatched: heuristic
