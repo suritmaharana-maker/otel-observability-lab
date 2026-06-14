@@ -1,15 +1,14 @@
-# OTel Collector Contrib v0.154.0 Helm values
-# Phase 1: minimal stub to verify pipeline works
-# Phase 2: full MELT pipeline with Beyla + Hubble + Dash0
+# OTel Collector Contrib v0.154.0
+# Phase 1: full pipeline to Dash0
+# Deployed as DaemonSet (one per node) in agent mode
 
-mode: daemonset  # agent mode — one per node
+mode: daemonset
 
 image:
   repository: otel/opentelemetry-collector-contrib
   tag: "0.154.0"
 
 # RBAC for k8sattributes processor
-# CRITICAL: Without this, every span arrives with no Kubernetes metadata
 clusterRole:
   create: true
   rules:
@@ -20,6 +19,13 @@ clusterRole:
       resources: ["replicasets"]
       verbs: ["get", "watch", "list"]
 
+extraEnvs:
+  - name: DASH0_AUTH_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: dash0-secret
+        key: auth-token
+
 config:
   receivers:
     otlp:
@@ -29,14 +35,32 @@ config:
         http:
           endpoint: "0.0.0.0:4318"
 
+    hostmetrics:
+      collection_interval: 30s
+      scrapers:
+        cpu: {}
+        memory: {}
+        disk: {}
+        network: {}
+
+    filelog:
+      include:
+        - /var/log/pods/otel-lab_*/*/*.log
+      include_file_path: true
+      operators:
+        - type: json_parser
+          timestamp:
+            parse_from: attributes.time
+            layout: '%Y-%m-%dT%H:%M:%S.%LZ'
+
   processors:
-    # CRITICAL: memory_limiter MUST be first in the processor chain
+    # CRITICAL: memory_limiter MUST be first
     memory_limiter:
       check_interval: 1s
       limit_mib: 512
       spike_limit_mib: 128
 
-    # Enriches every span/metric/log with K8s metadata
+    # Enriches every signal with K8s metadata
     k8sattributes:
       auth_type: serviceAccount
       passthrough: false
@@ -55,7 +79,6 @@ config:
         - sources:
             - from: connection
 
-    # Add environment labels to every signal
     resource:
       attributes:
         - key: deployment.environment
@@ -73,30 +96,28 @@ config:
       timeout: 10s
 
   exporters:
-    # Phase 1: log to stdout to verify pipeline works
+    otlp/dash0:
+      endpoint: "ingress.us-west-2.aws.dash0.com:4317"
+      headers:
+        Authorization: "Bearer ${env:DASH0_AUTH_TOKEN}"
+
     debug:
       verbosity: basic
-
-    # Phase 2+: Dash0 OTLP endpoint (uncomment when Dash0 account is ready)
-    # otlp/dash0:
-    #   endpoint: "ingress.us-east-2.aws.dash0.com:4317"
-    #   headers:
-    #     Authorization: "Bearer ${env:DASH0_AUTH_TOKEN}"
 
   service:
     pipelines:
       traces:
         receivers: [otlp]
         processors: [memory_limiter, k8sattributes, resource, batch]
-        exporters: [debug]
+        exporters: [otlp/dash0, debug]
       metrics:
-        receivers: [otlp]
+        receivers: [otlp, hostmetrics]
         processors: [memory_limiter, k8sattributes, resource, batch]
-        exporters: [debug]
+        exporters: [otlp/dash0]
       logs:
-        receivers: [otlp]
+        receivers: [otlp, filelog]
         processors: [memory_limiter, k8sattributes, resource, batch]
-        exporters: [debug]
+        exporters: [otlp/dash0]
 
 resources:
   limits:
@@ -105,3 +126,4 @@ resources:
   requests:
     cpu: 100m
     memory: 128Mi
+

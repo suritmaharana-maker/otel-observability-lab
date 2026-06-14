@@ -1,0 +1,68 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otelcol-config
+  namespace: observability
+data:
+  config.yaml: |
+    extensions:
+      bearertokenauth/dash0:
+        scheme: Bearer
+        token: "${env:DASH0_AUTH_TOKEN}"
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: "0.0.0.0:4317"
+          http:
+            endpoint: "0.0.0.0:4318"
+      hostmetrics:
+        collection_interval: 30s
+        root_path: /hostfs
+        scrapers:
+          cpu: {}
+          memory: {}
+          disk: {}
+          network: {}
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 512
+        spike_limit_mib: 128
+      batch:
+        send_batch_size: 1000
+        timeout: 10s
+      resource:
+        attributes:
+          - key: deployment.environment
+            value: "lab"
+            action: upsert
+          - key: cloud.provider
+            value: "aws"
+            action: upsert
+
+    exporters:
+      otlp/dash0:
+        endpoint: "ingress.us-west-2.aws.dash0.com:4317"
+        auth:
+          authenticator: bearertokenauth/dash0
+      debug:
+        verbosity: detailed
+
+    service:
+      extensions: [bearertokenauth/dash0]
+      pipelines:
+        metrics:
+          receivers: [otlp, hostmetrics]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlp/dash0, debug]
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlp/dash0, debug]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlp/dash0, debug]

@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-svc
+  namespace: otel-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: product-svc
+  template:
+    metadata:
+      labels:
+        app: product-svc
+    spec:
+      containers:
+        - name: product-svc
+          image: python:3.13.14-slim
+          command: ["sh", "-c"]
+          args:
+            - pip install fastapi uvicorn psycopg2-binary pydantic --quiet && uvicorn main:app --host 0.0.0.0 --port 8001
+          workingDir: /app
+          volumeMounts:
+            - name: app-code
+              mountPath: /app
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://otellab:otellab@postgres:5432/otellab"
+            - name: OTEL_SERVICE_NAME
+              value: "product-svc"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otelcol-opentelemetry-collector.observability.svc.cluster.local:4317"
+          ports:
+            - containerPort: 8001
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+      volumes:
+        - name: app-code
+          configMap:
+            name: product-svc-code
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: product-svc
+  namespace: otel-lab
+spec:
+  selector:
+    app: product-svc
+  ports:
+    - port: 8001
+      targetPort: 8001

@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: otel-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+    spec:
+      containers:
+        - name: gateway
+          image: python:3.13.14-slim
+          command: ["sh", "-c"]
+          args:
+            - pip install fastapi uvicorn httpx pydantic --quiet && uvicorn main:app --host 0.0.0.0 --port 8000
+          workingDir: /app
+          volumeMounts:
+            - name: app-code
+              mountPath: /app
+          env:
+            - name: PRODUCT_SVC_URL
+              value: "http://product-svc:8001"
+            - name: LLM_SVC_URL
+              value: "http://llm-svc:8002"
+            - name: OTEL_SERVICE_NAME
+              value: "gateway"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otelcol-opentelemetry-collector.observability.svc.cluster.local:4317"
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+      volumes:
+        - name: app-code
+          configMap:
+            name: gateway-code
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: otel-lab
+spec:
+  type: LoadBalancer
+  selector:
+    app: gateway
+  ports:
+    - port: 80
+      targetPort: 8000

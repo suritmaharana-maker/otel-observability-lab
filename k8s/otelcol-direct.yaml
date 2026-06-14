@@ -1,0 +1,182 @@
+# OTel Collector v0.154.0 — direct deployment, no Helm chart
+# Simple and guaranteed to work
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otelcol-config
+  namespace: observability
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: "0.0.0.0:4317"
+          http:
+            endpoint: "0.0.0.0:4318"
+      hostmetrics:
+        collection_interval: 30s
+        root_path: /hostfs
+        scrapers:
+          cpu: {}
+          memory: {}
+          disk: {}
+          network: {}
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 512
+        spike_limit_mib: 128
+      batch:
+        send_batch_size: 1000
+        timeout: 10s
+      resource:
+        attributes:
+          - key: deployment.environment
+            value: "lab"
+            action: upsert
+          - key: cloud.provider
+            value: "aws"
+            action: upsert
+          - key: cloud.region
+            value: "us-east-2"
+            action: upsert
+
+    exporters:
+      otlp/dash0:
+        endpoint: "ingress.us-west-2.aws.dash0.com:4317"
+        headers:
+          Authorization: "${env:DASH0_AUTH_TOKEN}"
+      debug:
+        verbosity: detailed
+
+    service:
+      pipelines:
+        metrics:
+          receivers: [otlp, hostmetrics]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlp/dash0, debug]
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlp/dash0, debug]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlp/dash0, debug]
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: otelcol
+  namespace: observability
+  labels:
+    app: otelcol
+spec:
+  selector:
+    matchLabels:
+      app: otelcol
+  template:
+    metadata:
+      labels:
+        app: otelcol
+    spec:
+      serviceAccountName: otelcol
+      hostNetwork: false
+      containers:
+        - name: otelcol
+          image: otel/opentelemetry-collector-contrib:0.154.0
+          args: ["--config=/conf/config.yaml"]
+          env:
+            - name: DASH0_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: dash0-secret
+                  key: auth-token
+            - name: MY_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+            - name: hostfs
+              mountPath: /hostfs
+              readOnly: true
+              mountPropagation: HostToContainer
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            runAsUser: 0
+      volumes:
+        - name: config
+          configMap:
+            name: otelcol-config
+        - name: hostfs
+          hostPath:
+            path: /
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule
+        - operator: Exists
+          effect: NoExecute
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otelcol
+  namespace: observability
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: otelcol
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces", "nodes"]
+    verbs: ["get", "watch", "list"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "watch", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: otelcol
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: otelcol
+subjects:
+  - kind: ServiceAccount
+    name: otelcol
+    namespace: observability
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otelcol
+  namespace: observability
+spec:
+  selector:
+    app: otelcol
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
