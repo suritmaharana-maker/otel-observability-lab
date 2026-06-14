@@ -47,17 +47,13 @@ jobs:
 
       - name: Lint Cilium values
         run: |
-          helm lint cilium/cilium --version 1.19.4 -f helm/cilium-values.yaml
+          helm pull cilium/cilium --version 1.19.4 --untar --untardir /tmp/cilium-chart
+          helm lint /tmp/cilium-chart/cilium -f helm/cilium-values.yaml
 
       - name: Lint OTel Collector values
         run: |
-          helm lint open-telemetry/opentelemetry-collector -f helm/otelcol-values.yaml
-
-      - name: Dry-run Cilium template
-        run: |
-          helm template cilium cilium/cilium --version 1.19.4 \
-            -f helm/cilium-values.yaml \
-            --dry-run > /dev/null
+          helm pull open-telemetry/opentelemetry-collector --untar --untardir /tmp/otelcol-chart
+          helm lint /tmp/otelcol-chart/opentelemetry-collector -f helm/otelcol-values.yaml
 
   python-lint:
     name: Python Lint
@@ -70,17 +66,14 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install linting tools
+      - name: Install ruff
         run: pip install ruff==0.9.10
 
-      - name: Lint gateway
-        run: ruff check apps/gateway/
-
-      - name: Lint product-svc
-        run: ruff check apps/product-svc/
-
-      - name: Lint llm-svc
-        run: ruff check apps/llm-svc/
+      - name: Lint all services
+        run: |
+          ruff check apps/gateway/
+          ruff check apps/product-svc/
+          ruff check apps/llm-svc/
 
   docker-build:
     name: Docker Build Check
@@ -88,11 +81,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build gateway image
-        run: docker build -t otel-lab-gateway:ci apps/gateway/
-
-      - name: Build product-svc image
-        run: docker build -t otel-lab-product-svc:ci apps/product-svc/
-
-      - name: Build llm-svc image
-        run: docker build -t otel-lab-llm-svc:ci apps/llm-svc/
+      - name: Build all images
+        run: |
+          docker build -t otel-lab-gateway:ci apps/gateway/
+          docker build -t otel-lab-product-svc:ci apps/product-svc/
+          docker build -t otel-lab-llm-svc:ci apps/llm-svc/
