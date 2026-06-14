@@ -87,10 +87,10 @@ module "vpc" {
   private_subnets = var.private_subnet_cidrs
   public_subnets  = var.public_subnet_cidrs
 
-  enable_nat_gateway     = true
-  single_nat_gateway     = true   # cost optimisation for lab; use one per AZ in prod
-  enable_dns_hostnames   = true
-  enable_dns_support     = true
+  enable_nat_gateway   = true
+  single_nat_gateway   = true # cost optimisation for lab; use one per AZ in prod
+  enable_dns_hostnames = true
+  enable_dns_support   = true
 
   # Required tags for EKS load balancer controller to discover subnets
   public_subnet_tags = {
@@ -115,7 +115,7 @@ module "eks" {
   version = "~> 21.0"
 
   name               = var.cluster_name
-  kubernetes_version = "1.35"   # argument renamed from cluster_version in v21
+  kubernetes_version = "1.35" # argument renamed from cluster_version in v21
 
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
@@ -174,15 +174,15 @@ resource "aws_iam_role_policy_attachment" "node_group_policies" {
 # correct CNI. Installing Cilium after nodes join = split-brain CNI state.
 
 resource "helm_release" "cilium" {
-  name       = "cilium"
-  repository = "https://helm.cilium.io"
-  chart      = "cilium"
-  version    = "1.19.4"
-  namespace  = "kube-system"
+  name             = "cilium"
+  repository       = "https://helm.cilium.io"
+  chart            = "cilium"
+  version          = "1.19.4"
+  namespace        = "kube-system"
   create_namespace = false
 
   wait    = true
-  timeout = 600   # 10 minutes — Cilium can take a few minutes to be fully ready
+  timeout = 600 # 10 minutes — Cilium can take a few minutes to be fully ready
 
   values = [file("${path.module}/../../helm/cilium-values.yaml")]
 
