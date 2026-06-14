@@ -1,46 +1,75 @@
-# Grafana Beyla 3.12.x Helm values
-# Phase 1: stub only — activated in Phase 2
-# Beyla provides zero-code L7 eBPF spans with W3C traceparent propagation
+# Grafana Beyla 3.20.0 — Helm chart 1.16.8
+# eBPF L7 autoinstrumentation for otel-lab namespace
+# Kernel 6.12.90 — TCX mode — no Cilium conflict
+# Source: grafana.com/docs/beyla/latest/cilium-compatibility/
 
-preset: network
+image:
+  repository: grafana/beyla
+  tag: "3.20.0"
+  pullPolicy: IfNotPresent
 
-# CRITICAL: cgroup mount required for context propagation in Python/FastAPI
-# Without this, Beyla generates its own trace IDs instead of inheriting app's
-extraVolumes:
-  - name: cgroup
-    hostPath:
-      path: /sys/fs/cgroup
-
-extraVolumeMounts:
-  - name: cgroup
-    mountPath: /sys/fs/cgroup
-
-# OTel export — points to local OTel Collector agent
-env:
-  BEYLA_OPEN_PORT: "8000,8001,8002"           # gateway, product-svc, llm-svc
-  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otelcol-agent.observability.svc.cluster.local:4317"
-  OTEL_SERVICE_NAME: "beyla-ebpf"
-  BEYLA_TRACE_PRINTER: "disabled"             # don't print to stdout in prod
-
-# Exclude the OTel Collector itself from instrumentation
-discovery:
-  services:
-    - exe_path_regexp: ".*otelcol.*"
-      skip: true
-
-# Resource limits
-resources:
-  limits:
-    cpu: 500m
-    memory: 256Mi
-  requests:
-    cpu: 100m
-    memory: 64Mi
-
-# Must run as DaemonSet on every node
+# DaemonSet — one Beyla per node
 daemonset:
   enabled: true
 
-# Privileged required for eBPF
+# Required capabilities for eBPF
 securityContext:
-  privileged: true
+  privileged: false
+  capabilities:
+    add:
+      - CAP_DAC_READ_SEARCH
+      - CAP_SYS_PTRACE
+      - CAP_PERFMON
+      - CAP_BPF
+      - CAP_CHECKPOINT_RESTORE
+      - CAP_NET_RAW
+
+# Required host access for eBPF
+preset: ""
+
+hostPID: true
+
+tolerations:
+  - operator: Exists
+    effect: NoSchedule
+  - operator: Exists
+    effect: NoExecute
+
+config:
+  data:
+    attributes:
+      kubernetes:
+        enable: true
+        cluster_name: "otel-lab"
+
+    # Instrument only otel-lab namespace
+    discovery:
+      services:
+        - k8s_namespace: "otel-lab"
+
+    # W3C traceparent propagation — correlates with OTel SDK spans
+    ebpf:
+      enable_context_propagation: true
+      traffic_control_backend: tcx
+
+    # OTLP export to our Collector
+    otel_traces_export:
+      endpoint: "http://otelcol.observability.svc.cluster.local:4317"
+
+    otel_metrics_export:
+      endpoint: "http://otelcol.observability.svc.cluster.local:4317"
+
+    # RED metrics — Rate, Errors, Duration per service
+    prometheus_export:
+      enabled: false
+
+    routes:
+      unmatched: heuristic
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
