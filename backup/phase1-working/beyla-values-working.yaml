@@ -1,0 +1,71 @@
+# Grafana Beyla 3.20.0 — Helm chart 1.16.8
+# EKS — kernel 6.12.90 — TCX mode
+# privileged: true REQUIRED for eBPF on Kubernetes
+# Source: grafana.com/docs/beyla/latest/setup/kubernetes/
+
+image:
+  repository: grafana/beyla
+  tag: "3.20.0"
+  pullPolicy: IfNotPresent
+
+daemonset:
+  enabled: true
+
+securityContext:
+  privileged: true
+  runAsUser: 0
+  allowPrivilegeEscalation: true
+  readOnlyRootFilesystem: false
+  capabilities:
+    add:
+      - BPF
+      - SYS_PTRACE
+      - NET_RAW
+      - CHECKPOINT_RESTORE
+      - DAC_READ_SEARCH
+      - PERFMON
+      - SYS_RESOURCE
+      - SYS_ADMIN
+      - NET_ADMIN
+    drop:
+      - ALL
+
+hostPID: true
+
+tolerations:
+  - operator: Exists
+    effect: NoSchedule
+  - operator: Exists
+    effect: NoExecute
+
+config:
+  data:
+    attributes:
+      kubernetes:
+        enable: true
+        cluster_name: "otel-lab"
+
+    discovery:
+      instrument:
+        - k8s_namespace: "otel-lab"
+
+    ebpf:
+      enable_context_propagation: true
+      traffic_control_backend: tcx
+
+    otel_traces_export:
+      endpoint: "http://otelcol.observability.svc.cluster.local:4317"
+
+    otel_metrics_export:
+      endpoint: "http://otelcol.observability.svc.cluster.local:4317"
+
+    routes:
+      unmatched: heuristic
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
