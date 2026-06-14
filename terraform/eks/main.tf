@@ -132,7 +132,7 @@ module "eks" {
 
   # Only install addons that don't conflict with Cilium
   # vpc-cni is intentionally excluded — Cilium is the CNI in ENI mode
-  cluster_addons = {
+  addons = {
     coredns = {
       most_recent = true
     }
