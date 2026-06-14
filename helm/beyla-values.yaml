@@ -1,7 +1,7 @@
 # Grafana Beyla 3.20.0 — Helm chart 1.16.8
 # EKS — kernel 6.12.90 — TCX mode
-# privileged: true REQUIRED for eBPF on Kubernetes
-# Source: grafana.com/docs/beyla/latest/setup/kubernetes/
+# Phase 3: Network mode enabled — flow bytes, TCP RTT, retransmissions
+# Source: opentelemetry.io/docs/zero-code/obi/network/
 
 image:
   repository: grafana/beyla
@@ -31,6 +31,8 @@ securityContext:
       - ALL
 
 hostPID: true
+hostNetwork: true
+dnsPolicy: ClusterFirstWithHostNet
 
 tolerations:
   - operator: Exists
@@ -45,6 +47,7 @@ config:
         enable: true
         cluster_name: "otel-lab"
 
+    # L7 application instrumentation
     discovery:
       instrument:
         - k8s_namespace: "otel-lab"
@@ -53,6 +56,18 @@ config:
       enable_context_propagation: true
       traffic_control_backend: tcx
 
+    # Network flow metrics — L3/L4 with src/dst IP, port, protocol
+    # Captures: flow bytes, TCP RTT, retransmissions per flow tuple
+    # Source: opentelemetry.io/docs/zero-code/obi/network/
+    network:
+      enable: true
+      cidrs:
+        - cidr: 10.0.0.0/8
+          name: "cluster-internal"
+        - cidr: 0.0.0.0/0
+          name: "external"
+
+    # Export both traces and network metrics
     otel_traces_export:
       endpoint: "http://otelcol.observability.svc.cluster.local:4317"
 
