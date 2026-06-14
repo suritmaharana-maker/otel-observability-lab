@@ -1,0 +1,74 @@
+﻿apiVersion: v1
+data:
+  config.yaml: |
+    extensions:
+      bearertokenauth/dash0:
+        scheme: Bearer
+        token: "${env:DASH0_AUTH_TOKEN}"
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: "0.0.0.0:4317"
+          http:
+            endpoint: "0.0.0.0:4318"
+      hostmetrics:
+        collection_interval: 30s
+        root_path: /hostfs
+        scrapers:
+          cpu: {}
+          memory: {}
+          disk: {}
+          network: {}
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 512
+        spike_limit_mib: 128
+      batch:
+        send_batch_size: 1000
+        timeout: 10s
+      resource:
+        attributes:
+          - key: deployment.environment
+            value: "lab"
+            action: upsert
+          - key: cloud.provider
+            value: "aws"
+            action: upsert
+
+    exporters:
+      otlp/dash0:
+        endpoint: "ingress.us-west-2.aws.dash0.com:4317"
+        auth:
+          authenticator: bearertokenauth/dash0
+      debug:
+        verbosity: detailed
+
+    service:
+      extensions: [bearertokenauth/dash0]
+      pipelines:
+        metrics:
+          receivers: [otlp, hostmetrics]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlp/dash0, debug]
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlp/dash0, debug]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlp/dash0, debug]
+kind: ConfigMap
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"v1","data":{"config.yaml":"extensions:\n  bearertokenauth/dash0:\n    scheme: Bearer\n    token: \"${env:DASH0_AUTH_TOKEN}\"\n\nreceivers:\n  otlp:\n    protocols:\n      grpc:\n        endpoint: \"0.0.0.0:4317\"\n      http:\n        endpoint: \"0.0.0.0:4318\"\n  hostmetrics:\n    collection_interval: 30s\n    root_path: /hostfs\n    scrapers:\n      cpu: {}\n      memory: {}\n      disk: {}\n      network: {}\n\nprocessors:\n  memory_limiter:\n    check_interval: 1s\n    limit_mib: 512\n    spike_limit_mib: 128\n  batch:\n    send_batch_size: 1000\n    timeout: 10s\n  resource:\n    attributes:\n      - key: deployment.environment\n        value: \"lab\"\n        action: upsert\n      - key: cloud.provider\n        value: \"aws\"\n        action: upsert\n\nexporters:\n  otlp/dash0:\n    endpoint: \"ingress.us-west-2.aws.dash0.com:4317\"\n    auth:\n      authenticator: bearertokenauth/dash0\n  debug:\n    verbosity: detailed\n\nservice:\n  extensions: [bearertokenauth/dash0]\n  pipelines:\n    metrics:\n      receivers: [otlp, hostmetrics]\n      processors: [memory_limiter, resource, batch]\n      exporters: [otlp/dash0, debug]\n    traces:\n      receivers: [otlp]\n      processors: [memory_limiter, resource, batch]\n      exporters: [otlp/dash0, debug]\n    logs:\n      receivers: [otlp]\n      processors: [memory_limiter, resource, batch]\n      exporters: [otlp/dash0, debug]\n"},"kind":"ConfigMap","metadata":{"annotations":{},"name":"otelcol-config","namespace":"observability"}}
+  creationTimestamp: "2026-06-14T11:29:55Z"
+  name: otelcol-config
+  namespace: observability
+  resourceVersion: "38244"
+  uid: 8698f51f-043c-49ec-b32a-fee3ac6c81c2

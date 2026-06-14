@@ -1,0 +1,765 @@
+﻿apiVersion: v1
+items:
+- apiVersion: v1
+  kind: Pod
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/restartedAt: "2026-06-14T07:29:57-04:00"
+    creationTimestamp: "2026-06-14T11:29:57Z"
+    generateName: otelcol-
+    generation: 1
+    labels:
+      app: otelcol
+      controller-revision-hash: 84c988db4b
+      pod-template-generation: "2"
+      topology.kubernetes.io/region: us-east-2
+      topology.kubernetes.io/zone: us-east-2b
+    name: otelcol-ft67q
+    namespace: observability
+    ownerReferences:
+    - apiVersion: apps/v1
+      blockOwnerDeletion: true
+      controller: true
+      kind: DaemonSet
+      name: otelcol
+      uid: c844c7cb-20b1-4053-95cb-fc7a15ad1790
+    resourceVersion: "38282"
+    uid: 07bbcc24-1503-4b58-95de-c68f9181a75c
+  spec:
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchFields:
+            - key: metadata.name
+              operator: In
+              values:
+              - ip-10-0-2-88.us-east-2.compute.internal
+    containers:
+    - args:
+      - --config=/conf/config.yaml
+      env:
+      - name: DASH0_AUTH_TOKEN
+        valueFrom:
+          secretKeyRef:
+            key: auth-token
+            name: dash0-secret
+      - name: MY_POD_IP
+        valueFrom:
+          fieldRef:
+            apiVersion: v1
+            fieldPath: status.podIP
+      image: otel/opentelemetry-collector-contrib:0.154.0
+      imagePullPolicy: IfNotPresent
+      name: otelcol
+      resources:
+        limits:
+          cpu: 500m
+          memory: 512Mi
+        requests:
+          cpu: 100m
+          memory: 128Mi
+      securityContext:
+        runAsUser: 0
+      terminationMessagePath: /dev/termination-log
+      terminationMessagePolicy: File
+      volumeMounts:
+      - mountPath: /conf
+        name: config
+      - mountPath: /hostfs
+        mountPropagation: HostToContainer
+        name: hostfs
+        readOnly: true
+      - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+        name: kube-api-access-sgg7h
+        readOnly: true
+    dnsPolicy: ClusterFirst
+    enableServiceLinks: true
+    nodeName: ip-10-0-2-88.us-east-2.compute.internal
+    preemptionPolicy: PreemptLowerPriority
+    priority: 0
+    restartPolicy: Always
+    schedulerName: default-scheduler
+    securityContext: {}
+    serviceAccount: otelcol
+    serviceAccountName: otelcol
+    terminationGracePeriodSeconds: 30
+    tolerations:
+    - effect: NoSchedule
+      operator: Exists
+    - effect: NoExecute
+      operator: Exists
+    - effect: NoExecute
+      key: node.kubernetes.io/not-ready
+      operator: Exists
+    - effect: NoExecute
+      key: node.kubernetes.io/unreachable
+      operator: Exists
+    - effect: NoSchedule
+      key: node.kubernetes.io/disk-pressure
+      operator: Exists
+    - effect: NoSchedule
+      key: node.kubernetes.io/memory-pressure
+      operator: Exists
+    - effect: NoSchedule
+      key: node.kubernetes.io/pid-pressure
+      operator: Exists
+    - effect: NoSchedule
+      key: node.kubernetes.io/unschedulable
+      operator: Exists
+    volumes:
+    - configMap:
+        defaultMode: 420
+        name: otelcol-config
+      name: config
+    - hostPath:
+        path: /
+        type: ""
+      name: hostfs
+    - name: kube-api-access-sgg7h
+      projected:
+        defaultMode: 420
+        sources:
+        - serviceAccountToken:
+            expirationSeconds: 3607
+            path: token
+        - configMap:
+            items:
+            - key: ca.crt
+              path: ca.crt
+            name: kube-root-ca.crt
+        - downwardAPI:
+            items:
+            - fieldRef:
+                apiVersion: v1
+                fieldPath: metadata.namespace
+              path: namespace
+  status:
+    conditions:
+    - lastProbeTime: null
+      lastTransitionTime: "2026-06-14T11:29:59Z"
+      observedGeneration: 1
+      status: "True"
+      type: PodReadyToStartContainers
+    - lastProbeTime: null
+      lastTransitionTime: "2026-06-14T11:29:57Z"
+      observedGeneration: 1
+      status: "True"
+      type: Initialized
+    - lastProbeTime: null
+      lastTransitionTime: "2026-06-14T11:29:59Z"
+      observedGeneration: 1
+      status: "True"
+      type: Ready
+    - lastProbeTime: null
+      lastTransitionTime: "2026-06-14T11:29:59Z"
+      observedGeneration: 1
+      status: "True"
+      type: ContainersReady
+    - lastProbeTime: null
+      lastTransitionTime: "2026-06-14T11:29:57Z"
+      observedGeneration: 1
+      status: "True"
+      type: PodScheduled
+    containerStatuses:
+    - allocatedResources:
+        cpu: 100m
+        memory: 128Mi
+      containerID: containerd://a09603f8078cc0dc8ffcf2c93f0392e808943b9e9efa3001507655c59ea97e50
+      image: docker.io/otel/opentelemetry-collector-contrib:0.154.0
+      imageID: docker.io/otel/opentelemetry-collector-contrib@sha256:b3079f45e19bdb7326bf49cdddce6cf60dfd865138db39f2733ea48ab17bc4cb
+      lastState: {}
+      name: otelcol
+      ready: true
+      resources:
+        limits:
+          cpu: 500m
+          memory: 512Mi
+        requests:
+          cpu: 100m
+          memory: 128Mi
+      restartCount: 0
+      started: true
+      state:
+        running:
+          startedAt: "2026-06-14T11:29:59Z"
+      user:
+        linux:
+          gid: 0
+          supplementalGroups:
+          - 0
+          uid: 0
+      volumeMounts:
+      - mountPath: /conf
+        name: config
+      - mountPath: /hostfs
+        name: hostfs
+        readOnly: true
+        recursiveReadOnly: Disabled
+      - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+        name: kube-api-access-sgg7h
+        readOnly: true
+        recursiveReadOnly: Disabled
+    hostIP: 10.0.2.88
+    hostIPs:
+    - ip: 10.0.2.88
+    observedGeneration: 1
+    phase: Running
+    podIP: 10.0.2.216
+    podIPs:
+    - ip: 10.0.2.216
+    qosClass: Burstable
+    startTime: "2026-06-14T11:29:57Z"
+- apiVersion: v1
+  kind: Pod
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/restartedAt: "2026-06-14T07:29:57-04:00"
+    creationTimestamp: "2026-06-14T11:29:59Z"
+    generateName: otelcol-
+    generation: 1
+    labels:
+      app: otelcol
+      controller-revision-hash: 84c988db4b
+      pod-template-generation: "2"
+      topology.kubernetes.io/region: us-east-2
+      topology.kubernetes.io/zone: us-east-2c
+    name: otelcol-nn5d9
+    namespace: observability
+    ownerReferences:
+    - apiVersion: apps/v1
+      blockOwnerDeletion: true
+      controller: true
+      kind: DaemonSet
+      name: otelcol
+      uid: c844c7cb-20b1-4053-95cb-fc7a15ad1790
+    resourceVersion: "38316"
+    uid: f186b8e0-d61b-476b-92c5-64bd8144d416
+  spec:
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchFields:
+            - key: metadata.name
+              operator: In
+              values:
+              - ip-10-0-3-236.us-east-2.compute.internal
+    containers:
+    - args:
+      - --config=/conf/config.yaml
+      env:
+      - name: DASH0_AUTH_TOKEN
+        valueFrom:
+          secretKeyRef:
+            key: auth-token
+            name: dash0-secret
+      - name: MY_POD_IP
+        valueFrom:
+          fieldRef:
+            apiVersion: v1
+            fieldPath: status.podIP
+      image: otel/opentelemetry-collector-contrib:0.154.0
+      imagePullPolicy: IfNotPresent
+      name: otelcol
+      resources:
+        limits:
+          cpu: 500m
+          memory: 512Mi
+        requests:
+          cpu: 100m
+          memory: 128Mi
+      securityContext:
+        runAsUser: 0
+      terminationMessagePath: /dev/termination-log
+      terminationMessagePolicy: File
+      volumeMounts:
+      - mountPath: /conf
+        name: config
+      - mountPath: /hostfs
+        mountPropagation: HostToContainer
+        name: hostfs
+        readOnly: true
+      - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+        name: kube-api-access-nknm5
+        readOnly: true
+    dnsPolicy: ClusterFirst
+    enableServiceLinks: true
+    nodeName: ip-10-0-3-236.us-east-2.compute.internal
+    preemptionPolicy: PreemptLowerPriority
+    priority: 0
+    restartPolicy: Always
+    schedulerName: default-scheduler
+    securityContext: {}
+    serviceAccount: otelcol
+    serviceAccountName: otelcol
+    terminationGracePeriodSeconds: 30
+    tolerations:
+    - effect: NoSchedule
+      operator: Exists
+    - effect: NoExecute
+      operator: Exists
+    - effect: NoExecute
+      key: node.kubernetes.io/not-ready
+      operator: Exists
+    - effect: NoExecute
+      key: node.kubernetes.io/unreachable
+      operator: Exists
+    - effect: NoSchedule
+      key: node.kubernetes.io/disk-pressure
+      operator: Exists
+    - effect: NoSchedule
+      key: node.kubernetes.io/memory-pressure
+      operator: Exists
+    - effect: NoSchedule
+      key: node.kubernetes.io/pid-pressure
+      operator: Exists
+    - effect: NoSchedule
+      key: node.kubernetes.io/unschedulable
+      operator: Exists
+    volumes:
+    - configMap:
+        defaultMode: 420
+        name: otelcol-config
+      name: config
+    - hostPath:
+        path: /
+        type: ""
+      name: hostfs
+    - name: kube-api-access-nknm5
+      projected:
+        defaultMode: 420
+        sources:
+        - serviceAccountToken:
+            expirationSeconds: 3607
+            path: token
+        - configMap:
+            items:
+            - key: ca.crt
+              path: ca.crt
+            name: kube-root-ca.crt
+        - downwardAPI:
+            items:
+            - fieldRef:
+                apiVersion: v1
+                fieldPath: metadata.namespace
+              path: namespace
+  status:
+    conditions:
+    - lastProbeTime: null
+      lastTransitionTime: "2026-06-14T11:30:01Z"
+      observedGeneration: 1
+      status: "True"
+      type: PodReadyToStartContainers
+    - lastProbeTime: null
+      lastTransitionTime: "2026-06-14T11:29:59Z"
+      observedGeneration: 1
+      status: "True"
+      type: Initialized
+    - lastProbeTime: null
+      lastTransitionTime: "2026-06-14T11:30:01Z"
+      observedGeneration: 1
+      status: "True"
+      type: Ready
+    - lastProbeTime: null
+      lastTransitionTime: "2026-06-14T11:30:01Z"
+      observedGeneration: 1
+      status: "True"
+      type: ContainersReady
+    - lastProbeTime: null
+      lastTransitionTime: "2026-06-14T11:29:59Z"
+      observedGeneration: 1
+      status: "True"
+      type: PodScheduled
+    containerStatuses:
+    - allocatedResources:
+        cpu: 100m
+        memory: 128Mi
+      containerID: containerd://c3be45f4fbdf165ad6a9e49ed867bd90847f43f23dc44c1a8e01abaeb158cd85
+      image: docker.io/otel/opentelemetry-collector-contrib:0.154.0
+      imageID: docker.io/otel/opentelemetry-collector-contrib@sha256:b3079f45e19bdb7326bf49cdddce6cf60dfd865138db39f2733ea48ab17bc4cb
+      lastState: {}
+      name: otelcol
+      ready: true
+      resources:
+        limits:
+          cpu: 500m
+          memory: 512Mi
+        requests:
+          cpu: 100m
+          memory: 128Mi
+      restartCount: 0
+      started: true
+      state:
+        running:
+          startedAt: "2026-06-14T11:30:00Z"
+      user:
+        linux:
+          gid: 0
+          supplementalGroups:
+          - 0
+          uid: 0
+      volumeMounts:
+      - mountPath: /conf
+        name: config
+      - mountPath: /hostfs
+        name: hostfs
+        readOnly: true
+        recursiveReadOnly: Disabled
+      - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+        name: kube-api-access-nknm5
+        readOnly: true
+        recursiveReadOnly: Disabled
+    hostIP: 10.0.3.236
+    hostIPs:
+    - ip: 10.0.3.236
+    observedGeneration: 1
+    phase: Running
+    podIP: 10.0.3.215
+    podIPs:
+    - ip: 10.0.3.215
+    qosClass: Burstable
+    startTime: "2026-06-14T11:29:59Z"
+- apiVersion: v1
+  kind: Pod
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/restartedAt: "2026-06-14T07:29:57-04:00"
+    creationTimestamp: "2026-06-14T11:30:02Z"
+    generateName: otelcol-
+    generation: 1
+    labels:
+      app: otelcol
+      controller-revision-hash: 84c988db4b
+      pod-template-generation: "2"
+      topology.kubernetes.io/region: us-east-2
+      topology.kubernetes.io/zone: us-east-2a
+    name: otelcol-xdkf8
+    namespace: observability
+    ownerReferences:
+    - apiVersion: apps/v1
+      blockOwnerDeletion: true
+      controller: true
+      kind: DaemonSet
+      name: otelcol
+      uid: c844c7cb-20b1-4053-95cb-fc7a15ad1790
+    resourceVersion: "38346"
+    uid: 817b41f3-9a90-4195-89d9-6868b3250013
+  spec:
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchFields:
+            - key: metadata.name
+              operator: In
+              values:
+              - ip-10-0-1-219.us-east-2.compute.internal
+    containers:
+    - args:
+      - --config=/conf/config.yaml
+      env:
+      - name: DASH0_AUTH_TOKEN
+        valueFrom:
+          secretKeyRef:
+            key: auth-token
+            name: dash0-secret
+      - name: MY_POD_IP
+        valueFrom:
+          fieldRef:
+            apiVersion: v1
+            fieldPath: status.podIP
+      image: otel/opentelemetry-collector-contrib:0.154.0
+      imagePullPolicy: IfNotPresent
+      name: otelcol
+      resources:
+        limits:
+          cpu: 500m
+          memory: 512Mi
+        requests:
+          cpu: 100m
+          memory: 128Mi
+      securityContext:
+        runAsUser: 0
+      terminationMessagePath: /dev/termination-log
+      terminationMessagePolicy: File
+      volumeMounts:
+      - mountPath: /conf
+        name: config
+      - mountPath: /hostfs
+        mountPropagation: HostToContainer
+        name: hostfs
+        readOnly: true
+      - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+        name: kube-api-access-8nw47
+        readOnly: true
+    dnsPolicy: ClusterFirst
+    enableServiceLinks: true
+    nodeName: ip-10-0-1-219.us-east-2.compute.internal
+    preemptionPolicy: PreemptLowerPriority
+    priority: 0
+    restartPolicy: Always
+    schedulerName: default-scheduler
+    securityContext: {}
+    serviceAccount: otelcol
+    serviceAccountName: otelcol
+    terminationGracePeriodSeconds: 30
+    tolerations:
+    - effect: NoSchedule
+      operator: Exists
+    - effect: NoExecute
+      operator: Exists
+    - effect: NoExecute
+      key: node.kubernetes.io/not-ready
+      operator: Exists
+    - effect: NoExecute
+      key: node.kubernetes.io/unreachable
+      operator: Exists
+    - effect: NoSchedule
+      key: node.kubernetes.io/disk-pressure
+      operator: Exists
+    - effect: NoSchedule
+      key: node.kubernetes.io/memory-pressure
+      operator: Exists
+    - effect: NoSchedule
+      key: node.kubernetes.io/pid-pressure
+      operator: Exists
+    - effect: NoSchedule
+      key: node.kubernetes.io/unschedulable
+      operator: Exists
+    volumes:
+    - configMap:
+        defaultMode: 420
+        name: otelcol-config
+      name: config
+    - hostPath:
+        path: /
+        type: ""
+      name: hostfs
+    - name: kube-api-access-8nw47
+      projected:
+        defaultMode: 420
+        sources:
+        - serviceAccountToken:
+            expirationSeconds: 3607
+            path: token
+        - configMap:
+            items:
+            - key: ca.crt
+              path: ca.crt
+            name: kube-root-ca.crt
+        - downwardAPI:
+            items:
+            - fieldRef:
+                apiVersion: v1
+                fieldPath: metadata.namespace
+              path: namespace
+  status:
+    conditions:
+    - lastProbeTime: null
+      lastTransitionTime: "2026-06-14T11:30:03Z"
+      observedGeneration: 1
+      status: "True"
+      type: PodReadyToStartContainers
+    - lastProbeTime: null
+      lastTransitionTime: "2026-06-14T11:30:02Z"
+      observedGeneration: 1
+      status: "True"
+      type: Initialized
+    - lastProbeTime: null
+      lastTransitionTime: "2026-06-14T11:30:03Z"
+      observedGeneration: 1
+      status: "True"
+      type: Ready
+    - lastProbeTime: null
+      lastTransitionTime: "2026-06-14T11:30:03Z"
+      observedGeneration: 1
+      status: "True"
+      type: ContainersReady
+    - lastProbeTime: null
+      lastTransitionTime: "2026-06-14T11:30:02Z"
+      observedGeneration: 1
+      status: "True"
+      type: PodScheduled
+    containerStatuses:
+    - allocatedResources:
+        cpu: 100m
+        memory: 128Mi
+      containerID: containerd://477787199ff69bec76729a0882b55bdd7afe8bf78d2cbd4f0ff876a5c9a5eae1
+      image: docker.io/otel/opentelemetry-collector-contrib:0.154.0
+      imageID: docker.io/otel/opentelemetry-collector-contrib@sha256:b3079f45e19bdb7326bf49cdddce6cf60dfd865138db39f2733ea48ab17bc4cb
+      lastState: {}
+      name: otelcol
+      ready: true
+      resources:
+        limits:
+          cpu: 500m
+          memory: 512Mi
+        requests:
+          cpu: 100m
+          memory: 128Mi
+      restartCount: 0
+      started: true
+      state:
+        running:
+          startedAt: "2026-06-14T11:30:03Z"
+      user:
+        linux:
+          gid: 0
+          supplementalGroups:
+          - 0
+          uid: 0
+      volumeMounts:
+      - mountPath: /conf
+        name: config
+      - mountPath: /hostfs
+        name: hostfs
+        readOnly: true
+        recursiveReadOnly: Disabled
+      - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+        name: kube-api-access-8nw47
+        readOnly: true
+        recursiveReadOnly: Disabled
+    hostIP: 10.0.1.219
+    hostIPs:
+    - ip: 10.0.1.219
+    observedGeneration: 1
+    phase: Running
+    podIP: 10.0.1.107
+    podIPs:
+    - ip: 10.0.1.107
+    qosClass: Burstable
+    startTime: "2026-06-14T11:30:02Z"
+- apiVersion: v1
+  kind: Service
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/last-applied-configuration: |
+        {"apiVersion":"v1","kind":"Service","metadata":{"annotations":{},"name":"otelcol","namespace":"observability"},"spec":{"ports":[{"name":"otlp-grpc","port":4317,"targetPort":4317},{"name":"otlp-http","port":4318,"targetPort":4318}],"selector":{"app":"otelcol"}}}
+    creationTimestamp: "2026-06-14T11:25:52Z"
+    name: otelcol
+    namespace: observability
+    resourceVersion: "37385"
+    uid: 20110816-f254-4972-90ed-131e56725d9a
+  spec:
+    clusterIP: 172.20.149.225
+    clusterIPs:
+    - 172.20.149.225
+    internalTrafficPolicy: Cluster
+    ipFamilies:
+    - IPv4
+    ipFamilyPolicy: SingleStack
+    ports:
+    - name: otlp-grpc
+      port: 4317
+      protocol: TCP
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      protocol: TCP
+      targetPort: 4318
+    selector:
+      app: otelcol
+    sessionAffinity: None
+    type: ClusterIP
+  status:
+    loadBalancer: {}
+- apiVersion: apps/v1
+  kind: DaemonSet
+  metadata:
+    annotations:
+      deprecated.daemonset.template.generation: "2"
+      kubectl.kubernetes.io/last-applied-configuration: |
+        {"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"annotations":{},"labels":{"app":"otelcol"},"name":"otelcol","namespace":"observability"},"spec":{"selector":{"matchLabels":{"app":"otelcol"}},"template":{"metadata":{"labels":{"app":"otelcol"}},"spec":{"containers":[{"args":["--config=/conf/config.yaml"],"env":[{"name":"DASH0_AUTH_TOKEN","valueFrom":{"secretKeyRef":{"key":"auth-token","name":"dash0-secret"}}},{"name":"MY_POD_IP","valueFrom":{"fieldRef":{"fieldPath":"status.podIP"}}}],"image":"otel/opentelemetry-collector-contrib:0.154.0","name":"otelcol","resources":{"limits":{"cpu":"500m","memory":"512Mi"},"requests":{"cpu":"100m","memory":"128Mi"}},"securityContext":{"runAsUser":0},"volumeMounts":[{"mountPath":"/conf","name":"config"},{"mountPath":"/hostfs","mountPropagation":"HostToContainer","name":"hostfs","readOnly":true}]}],"hostNetwork":false,"serviceAccountName":"otelcol","tolerations":[{"effect":"NoSchedule","operator":"Exists"},{"effect":"NoExecute","operator":"Exists"}],"volumes":[{"configMap":{"name":"otelcol-config"},"name":"config"},{"hostPath":{"path":"/"},"name":"hostfs"}]}}}}
+    creationTimestamp: "2026-06-14T11:25:52Z"
+    generation: 2
+    labels:
+      app: otelcol
+    name: otelcol
+    namespace: observability
+    resourceVersion: "38349"
+    uid: c844c7cb-20b1-4053-95cb-fc7a15ad1790
+  spec:
+    revisionHistoryLimit: 10
+    selector:
+      matchLabels:
+        app: otelcol
+    template:
+      metadata:
+        annotations:
+          kubectl.kubernetes.io/restartedAt: "2026-06-14T07:29:57-04:00"
+        labels:
+          app: otelcol
+      spec:
+        containers:
+        - args:
+          - --config=/conf/config.yaml
+          env:
+          - name: DASH0_AUTH_TOKEN
+            valueFrom:
+              secretKeyRef:
+                key: auth-token
+                name: dash0-secret
+          - name: MY_POD_IP
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: status.podIP
+          image: otel/opentelemetry-collector-contrib:0.154.0
+          imagePullPolicy: IfNotPresent
+          name: otelcol
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            runAsUser: 0
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+          - mountPath: /conf
+            name: config
+          - mountPath: /hostfs
+            mountPropagation: HostToContainer
+            name: hostfs
+            readOnly: true
+        dnsPolicy: ClusterFirst
+        restartPolicy: Always
+        schedulerName: default-scheduler
+        securityContext: {}
+        serviceAccount: otelcol
+        serviceAccountName: otelcol
+        terminationGracePeriodSeconds: 30
+        tolerations:
+        - effect: NoSchedule
+          operator: Exists
+        - effect: NoExecute
+          operator: Exists
+        volumes:
+        - configMap:
+            defaultMode: 420
+            name: otelcol-config
+          name: config
+        - hostPath:
+            path: /
+            type: ""
+          name: hostfs
+    updateStrategy:
+      rollingUpdate:
+        maxSurge: 0
+        maxUnavailable: 1
+      type: RollingUpdate
+  status:
+    currentNumberScheduled: 3
+    desiredNumberScheduled: 3
+    numberAvailable: 3
+    numberMisscheduled: 0
+    numberReady: 3
+    observedGeneration: 2
+    updatedNumberScheduled: 3
+kind: List
+metadata:
+  resourceVersion: ""

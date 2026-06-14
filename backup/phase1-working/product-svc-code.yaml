@@ -1,0 +1,129 @@
+﻿apiVersion: v1
+data:
+  main.py: |
+    """
+    Product Service ΓÇö Phase 1 skeleton
+    Serves product catalog from PostgreSQL
+    OTel instrumentation + psycopg2 tracing added in Phase 2
+    """
+    import os
+    import psycopg2
+    import psycopg2.extras
+    from fastapi import FastAPI, HTTPException
+    from pydantic import BaseModel
+    from typing import List, Optional
+
+    app = FastAPI(
+        title="OTel Lab ΓÇö Product Service",
+        version="0.1.0",
+        description="Product catalog service for the OTel Observability Lab",
+    )
+
+    DATABASE_URL = os.getenv(
+        "DATABASE_URL",
+        "postgresql://otellab:otellab@postgres:5432/otellab"
+    )
+
+
+    def get_db():
+        """Get a database connection"""
+        conn = psycopg2.connect(DATABASE_URL)
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+
+    class Product(BaseModel):
+        id: Optional[int] = None
+        name: str
+        description: str
+        price: float
+        category: str
+
+
+    @app.on_event("startup")
+    async def startup():
+        """Create tables and seed data on startup"""
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS products (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                description TEXT,
+                price DECIMAL(10,2) NOT NULL,
+                category VARCHAR(100),
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        # Seed with sample data if empty
+        cur.execute("SELECT COUNT(*) FROM products")
+        count = cur.fetchone()[0]
+        if count == 0:
+            sample_products = [
+                ("Laptop Pro X1", "High-performance laptop", 1299.99, "Electronics"),
+                ("Wireless Headphones", "Noise-cancelling headphones", 299.99, "Electronics"),
+                ("Standing Desk", "Adjustable height desk", 599.99, "Furniture"),
+                ("Mechanical Keyboard", "RGB mechanical keyboard", 149.99, "Electronics"),
+                ("Monitor 4K", "27-inch 4K display", 499.99, "Electronics"),
+            ]
+            cur.executemany(
+                "INSERT INTO products (name, description, price, category) VALUES (%s, %s, %s, %s)",
+                sample_products
+            )
+        conn.commit()
+        cur.close()
+        conn.close()
+
+
+    @app.get("/health")
+    async def health():
+        return {"status": "ok", "service": "product-svc", "version": "0.1.0"}
+
+
+    @app.get("/products", response_model=List[Product])
+    async def list_products():
+        """List all products from PostgreSQL"""
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        try:
+            cur.execute("SELECT id, name, description, price, category FROM products ORDER BY id")
+            products = cur.fetchall()
+            return [dict(p) for p in products]
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        finally:
+            cur.close()
+            conn.close()
+
+
+    @app.get("/products/{product_id}", response_model=Product)
+    async def get_product(product_id: int):
+        """Get a single product by ID"""
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        try:
+            cur.execute(
+                "SELECT id, name, description, price, category FROM products WHERE id = %s",
+                (product_id,)
+            )
+            product = cur.fetchone()
+            if not product:
+                raise HTTPException(status_code=404, detail="Product not found")
+            return dict(product)
+        finally:
+            cur.close()
+            conn.close()
+
+
+    if __name__ == "__main__":
+        import uvicorn
+        uvicorn.run(app, host="0.0.0.0", port=8001)
+kind: ConfigMap
+metadata:
+  creationTimestamp: "2026-06-14T10:44:04Z"
+  name: product-svc-code
+  namespace: otel-lab
+  resourceVersion: "28736"
+  uid: 3885af3f-3dc7-4a6d-8a65-6cd6b5f6c6b1
