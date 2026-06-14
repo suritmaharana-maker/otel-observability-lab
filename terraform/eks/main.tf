@@ -64,13 +64,13 @@ provider "kubernetes" {
   }
 }
 
-# ── DATA SOURCES ──────────────────────────────────────────────────────────────
+# â”€â”€ DATA SOURCES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 data "aws_availability_zones" "available" {
   state = "available"
 }
 
-# ── VPC ───────────────────────────────────────────────────────────────────────
+# â”€â”€ VPC â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
@@ -98,11 +98,11 @@ module "vpc" {
   }
 }
 
-# ── EKS CLUSTER ───────────────────────────────────────────────────────────────
+# â”€â”€ EKS CLUSTER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # CRITICAL: addons block is intentionally EMPTY.
 #
 # Reason: The EKS module v21 waits for addons to reach ACTIVE state immediately
-# after cluster creation — before any nodes exist. CoreDNS requires nodes to
+# after cluster creation â€” before any nodes exist. CoreDNS requires nodes to
 # schedule on. With Cilium replacing the VPC CNI there is no Fargate fallback.
 # Result: 20-minute timeout then failure. This was the root cause of the first
 # failed apply.
@@ -127,15 +127,15 @@ module "eks" {
 
   enable_cluster_creator_admin_permissions = true
 
-  # Node groups managed outside this module — see aws_eks_node_group below
+  # Node groups managed outside this module â€” see aws_eks_node_group below
   eks_managed_node_groups = {}
 
-  # INTENTIONALLY EMPTY — addons installed after nodes join
+  # INTENTIONALLY EMPTY â€” addons installed after nodes join
   # See standalone aws_eks_addon resources below
   addons = {}
 }
 
-# ── IAM ROLE FOR NODE GROUP ───────────────────────────────────────────────────
+# â”€â”€ IAM ROLE FOR NODE GROUP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 resource "aws_iam_role" "node_group" {
   name = "${var.cluster_name}-node-group-role"
@@ -161,7 +161,7 @@ resource "aws_iam_role_policy_attachment" "node_group_policies" {
   policy_arn = each.value
 }
 
-# ── PATCH aws-node BEFORE CILIUM ─────────────────────────────────────────────
+# â”€â”€ PATCH aws-node BEFORE CILIUM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Source: docs.cilium.io/en/stable + egrosdou01.github.io/personal-blog
 #
 # Patching aws-node with a node selector that no node will ever match
@@ -189,9 +189,9 @@ resource "null_resource" "patch_aws_node" {
   depends_on = [module.eks]
 }
 
-# ── CILIUM — INSTALLS BEFORE NODE GROUP ───────────────────────────────────────
+# â”€â”€ CILIUM â€” INSTALLS BEFORE NODE GROUP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Must depend on patch_aws_node so aws-node is disabled before Cilium starts
-# managing ENIs. Node group depends on this resource — enforcing correct order.
+# managing ENIs. Node group depends on this resource â€” enforcing correct order.
 
 resource "helm_release" "cilium" {
   name             = "cilium"
@@ -209,7 +209,7 @@ resource "helm_release" "cilium" {
   depends_on = [null_resource.patch_aws_node]
 }
 
-# ── EKS NODE GROUP — AFTER CILIUM ────────────────────────────────────────────
+# â”€â”€ EKS NODE GROUP â€” AFTER CILIUM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Nodes join AFTER Cilium is ready. Cilium removes the agent-not-ready taint
 # automatically once it has initialised on each node.
 
@@ -231,7 +231,7 @@ resource "aws_eks_node_group" "main" {
     max_unavailable = 1
   }
 
-  # AL2023 ships Linux kernel 6.1 — fully compatible with Cilium 1.19.4 eBPF
+  # AL2023 ships Linux kernel 6.1 â€” fully compatible with Cilium 1.19.4 eBPF
   ami_type = "AL2023_x86_64_STANDARD"
 
   # Required by Cilium 1.19 docs for EKS managed node groups
@@ -252,7 +252,7 @@ resource "aws_eks_node_group" "main" {
   ]
 }
 
-# ── COREDNS ADDON — AFTER NODES JOIN ─────────────────────────────────────────
+# â”€â”€ COREDNS ADDON â€” AFTER NODES JOIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # CRITICAL: depends_on = [aws_eks_node_group.main]
 # This is the fix for the CoreDNS DEGRADED timeout failure.
 # CoreDNS requires nodes to schedule on. Installing it before nodes exist
@@ -262,26 +262,24 @@ resource "aws_eks_node_group" "main" {
 resource "aws_eks_addon" "coredns" {
   cluster_name                = module.eks.cluster_name
   addon_name                  = "coredns"
-  most_recent                 = true
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
 
   depends_on = [aws_eks_node_group.main]
 }
 
-# ── KUBE-PROXY ADDON — AFTER NODES JOIN ──────────────────────────────────────
+# â”€â”€ KUBE-PROXY ADDON â€” AFTER NODES JOIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 resource "aws_eks_addon" "kube_proxy" {
   cluster_name                = module.eks.cluster_name
   addon_name                  = "kube-proxy"
-  most_recent                 = true
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
 
   depends_on = [aws_eks_node_group.main]
 }
 
-# ── NAMESPACES — AFTER NODES AND ADDONS ──────────────────────────────────────
+# â”€â”€ NAMESPACES â€” AFTER NODES AND ADDONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 resource "kubernetes_namespace" "observability" {
   metadata {
