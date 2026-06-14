@@ -5,11 +5,6 @@ metadata:
   namespace: observability
 data:
   config.yaml: |
-    extensions:
-      bearertokenauth/dash0:
-        scheme: Bearer
-        token: "${env:DASH0_AUTH_TOKEN}"
-
     receivers:
       otlp:
         protocols:
@@ -17,6 +12,7 @@ data:
             endpoint: "0.0.0.0:4317"
           http:
             endpoint: "0.0.0.0:4318"
+    
       hostmetrics:
         collection_interval: 30s
         root_path: /hostfs
@@ -25,7 +21,19 @@ data:
           memory: {}
           disk: {}
           network: {}
-
+    
+      prometheus/hubble:
+        config:
+          scrape_configs:
+            - job_name: "hubble-metrics"
+              scrape_interval: 30s
+              static_configs:
+                - targets: ["hubble-metrics.kube-system.svc.cluster.local:9965"]
+              metric_relabel_configs:
+                - source_labels: [__name__]
+                  regex: "hubble_.*"
+                  action: keep
+    
     processors:
       memory_limiter:
         check_interval: 1s
@@ -42,22 +50,30 @@ data:
           - key: cloud.provider
             value: "aws"
             action: upsert
-
+          - key: cloud.region
+            value: "us-east-2"
+            action: upsert
+    
     exporters:
       otlp/dash0:
         endpoint: "ingress.us-west-2.aws.dash0.com:4317"
         auth:
           authenticator: bearertokenauth/dash0
       debug:
-        verbosity: detailed
-
+        verbosity: basic
+    
+    extensions:
+      bearertokenauth/dash0:
+        scheme: Bearer
+        token: "${env:DASH0_AUTH_TOKEN}"
+    
     service:
       extensions: [bearertokenauth/dash0]
       pipelines:
         metrics:
-          receivers: [otlp, hostmetrics]
+          receivers: [otlp, hostmetrics, prometheus/hubble]
           processors: [memory_limiter, resource, batch]
-          exporters: [otlp/dash0, debug]
+          exporters: [otlp/dash0]
         traces:
           receivers: [otlp]
           processors: [memory_limiter, resource, batch]
