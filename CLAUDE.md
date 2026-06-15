@@ -53,10 +53,10 @@ Three Python FastAPI services:
 - Node.js: 24.16.0 LTS
 - opentelemetry-sdk: 1.42.1
 - opentelemetry-instrumentation-fastapi: 0.63b1  (aligns with SDK 1.42.1)
-- opentelemetry-instrumentation-psycopg2: 0.63b0  (aligns with SDK 1.42.1)
+- opentelemetry-instrumentation-psycopg2: 0.63b1  (aligns with SDK 1.42.1)
 - traceloop-sdk: 0.61.0
 - Cilium CNI: 1.19.4
-- Grafana Beyla: 3.12.x
+- Grafana Beyla: 3.20.0 (Helm chart 1.16.8)
 - OTel Collector Contrib: v0.154.0
 - Terraform: 1.15.6
 - Terraform AWS provider: 6.50.0
