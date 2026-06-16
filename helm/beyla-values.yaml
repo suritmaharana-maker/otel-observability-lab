@@ -1,82 +1,39 @@
-# Grafana Beyla 3.20.0 — Helm chart 1.16.8
-# EKS — kernel 6.12.90 — TCX mode
-# Phase 3: Network mode enabled — flow bytes, TCP RTT, retransmissions
-# Source: opentelemetry.io/docs/zero-code/obi/network/
-
-image:
-  repository: grafana/beyla
-  tag: "3.20.0"
-  pullPolicy: IfNotPresent
-
-daemonset:
-  enabled: true
-
-securityContext:
-  privileged: true
-  runAsUser: 0
-  allowPrivilegeEscalation: true
-  readOnlyRootFilesystem: false
-  capabilities:
-    add:
-      - BPF
-      - SYS_PTRACE
-      - NET_RAW
-      - CHECKPOINT_RESTORE
-      - DAC_READ_SEARCH
-      - PERFMON
-      - SYS_RESOURCE
-      - SYS_ADMIN
-      - NET_ADMIN
-    drop:
-      - ALL
-
-hostPID: true
-hostNetwork: true
-dnsPolicy: ClusterFirstWithHostNet
-
-tolerations:
-  - operator: Exists
-    effect: NoSchedule
-  - operator: Exists
-    effect: NoExecute
-
 config:
   data:
     attributes:
       kubernetes:
+        cluster_name: otel-lab
         enable: true
-        cluster_name: "otel-lab"
-
-    # L7 application instrumentation
     discovery:
       instrument:
-        - k8s_namespace: "otel-lab"
-
+      - k8s_namespace: otel-lab
     ebpf:
       enable_context_propagation: true
       traffic_control_backend: tcx
-
-    # Network flow metrics — L3/L4 with src/dst IP, port, protocol
-    # Captures: flow bytes, TCP RTT, retransmissions per flow tuple
-    # Source: opentelemetry.io/docs/zero-code/obi/network/
     network:
-      enable: true
       cidrs:
-        - cidr: 10.0.0.0/8
-          name: "cluster-internal"
-        - cidr: 0.0.0.0/0
-          name: "external"
-
-    # Export both traces and network metrics
-    otel_traces_export:
-      endpoint: "http://otelcol.observability.svc.cluster.local:4317"
-
+      - cidr: 10.0.0.0/8
+        name: cluster-internal
+      - cidr: 0.0.0.0/0
+        name: external
+      enable: true
+      reporting_period: 5s
     otel_metrics_export:
-      endpoint: "http://otelcol.observability.svc.cluster.local:4317"
-
+      endpoint: http://otelcol.observability.svc.cluster.local:4317
+      interval: 5s
+    otel_traces_export:
+      endpoint: http://otelcol.observability.svc.cluster.local:4317
     routes:
       unmatched: heuristic
-
+daemonset:
+  enabled: true
+dnsPolicy: ClusterFirstWithHostNet
+hostNetwork: true
+hostPID: true
+image:
+  pullPolicy: IfNotPresent
+  repository: grafana/beyla
+  tag: 3.20.0
 resources:
   limits:
     cpu: 500m
@@ -84,3 +41,26 @@ resources:
   requests:
     cpu: 100m
     memory: 128Mi
+securityContext:
+  allowPrivilegeEscalation: true
+  capabilities:
+    add:
+    - BPF
+    - SYS_PTRACE
+    - NET_RAW
+    - CHECKPOINT_RESTORE
+    - DAC_READ_SEARCH
+    - PERFMON
+    - SYS_RESOURCE
+    - SYS_ADMIN
+    - NET_ADMIN
+    drop:
+    - ALL
+  privileged: true
+  readOnlyRootFilesystem: false
+  runAsUser: 0
+tolerations:
+- effect: NoSchedule
+  operator: Exists
+- effect: NoExecute
+  operator: Exists
