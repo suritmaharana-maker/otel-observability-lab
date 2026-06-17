@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-svc
+  namespace: otel-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llm-svc
+  template:
+    metadata:
+      labels:
+        app: llm-svc
+    spec:
+      containers:
+      - name: llm-svc
+        image: 982920153340.dkr.ecr.us-east-2.amazonaws.com/otel-lab/llm-svc:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8002
+        env:
+        - name: PRODUCT_SVC_URL
+          value: "http://product-svc:8001"
+        - name: AWS_REGION
+          value: "us-east-2"
+        - name: BEDROCK_MODEL_ID
+          value: "us.amazon.nova-micro-v1:0"
+        - name: LLM_TEMPERATURE
+          value: "0.3"
+        - name: LLM_MAX_TOKENS
+          value: "256"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otelcol.observability.svc.cluster.local:4317"
+        - name: OTEL_SERVICE_NAME
+          value: "llm-svc"
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8002
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8002
+          initialDelaySeconds: 30
+          periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-svc
+  namespace: otel-lab
+spec:
+  selector:
+    app: llm-svc
+  ports:
+  - port: 8002
+    targetPort: 8002
