@@ -1,0 +1,17 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: fault-block-gateway
+  namespace: otel-lab
+spec:
+  endpointSelector:
+    matchLabels:
+      app: product-svc
+  ingressDeny:
+  - fromEndpoints:
+    - matchLabels:
+        app: gateway
+    toPorts:
+    - ports:
+      - port: "8001"
+        protocol: TCP
