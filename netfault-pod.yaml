@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: netfault
+  namespace: otel-lab
+spec:
+  nodeName: ip-10-0-3-236.us-east-2.compute.internal
+  hostPID: true
+  hostNetwork: true
+  containers:
+  - name: netfault
+    image: ubuntu
+    command: ["sleep", "3600"]
+    securityContext:
+      privileged: true
+    volumeMounts:
+    - name: host
+      mountPath: /host
+  volumes:
+  - name: host
+    hostPath:
+      path: /
+  tolerations:
+  - operator: Exists
