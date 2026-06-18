@@ -6,8 +6,7 @@ metadata:
 data:
   main.py: |
     """
-    API Gateway - Phase 4 - MELT + LLM recommendations
-    Preserves all Phase 2 OTel instrumentation, adds /recommendations route
+    API Gateway - Phase 5 - MELT + LLM recommendations + AIOps diagnosis
     """
     import os
     import logging
@@ -34,7 +33,7 @@ data:
 
     resource = Resource.create({
         "service.name": "gateway",
-        "service.version": "0.4.0",
+        "service.version": "0.5.0",
         "deployment.environment": "lab",
         "cloud.provider": "aws",
         "cloud.region": "us-east-2",
@@ -90,7 +89,7 @@ data:
     logging.getLogger().addHandler(stdout_handler)
 
     HTTPXClientInstrumentor().instrument()
-    app = FastAPI(title="OTel Lab - API Gateway", version="0.4.0")
+    app = FastAPI(title="OTel Lab - API Gateway", version="0.5.0")
     FastAPIInstrumentor.instrument_app(app)
 
     logger = logging.getLogger("gateway")
@@ -100,7 +99,7 @@ data:
     @app.get("/health")
     async def health():
         logger.info("health_check status=ok")
-        return {"status": "ok", "service": "gateway", "version": "0.4.0"}
+        return {"status": "ok", "service": "gateway", "version": "0.5.0"}
 
     @app.get("/products")
     async def list_products():
@@ -118,14 +117,12 @@ data:
 
     @app.get("/products/{product_id}")
     async def get_product(product_id: int):
-        logger.info(f"get_product product_id={product_id}")
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(f"{PRODUCT_SVC_URL}/products/{product_id}", timeout=5.0)
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPError as e:
-                logger.error(f"product_svc_error product_id={product_id} error={str(e)}")
                 raise HTTPException(status_code=502, detail=f"product-svc error: {str(e)}")
 
     @app.get("/recommendations")
@@ -143,7 +140,6 @@ data:
                 logger.info(
                     f"recommendation_complete model={result.get('model')} "
                     f"input_tokens={result.get('tokens', {}).get('input')} "
-                    f"output_tokens={result.get('tokens', {}).get('output')} "
                     f"cost_usd={result.get('cost_usd')}"
                 )
                 return result
@@ -151,6 +147,24 @@ data:
                 logger.error(f"llm_svc_error error={str(e)}")
                 raise HTTPException(status_code=502, detail=f"llm-svc error: {str(e)}")
 
-    if __name__ == "__main__":
-        import uvicorn
-        uvicorn.run(app, host="0.0.0.0", port=8000)
+    @app.get("/diagnose")
+    async def diagnose(window: str = "5m", service: str = "gateway"):
+        logger.info(f"diagnose_request window={window} service={service}")
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(
+                    f"{LLM_SVC_URL}/diagnose",
+                    params={"window": window, "service": service},
+                    timeout=30.0
+                )
+                response.raise_for_status()
+                result = response.json()
+                logger.info(
+                    f"diagnose_complete root_cause={result.get('diagnosis', {}).get('root_cause')} "
+                    f"confidence={result.get('diagnosis', {}).get('confidence')} "
+                    f"severity={result.get('diagnosis', {}).get('severity')}"
+                )
+                return result
+            except httpx.HTTPError as e:
+                logger.error(f"diagnose_error error={str(e)}")
+                raise HTTPException(status_code=502, detail=f"diagnose error: {str(e)}")

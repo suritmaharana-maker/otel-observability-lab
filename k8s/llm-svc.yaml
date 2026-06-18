@@ -29,11 +29,18 @@ spec:
         - name: LLM_TEMPERATURE
           value: "0.3"
         - name: LLM_MAX_TOKENS
-          value: "256"
+          value: "512"
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           value: "http://otelcol.observability.svc.cluster.local:4317"
         - name: OTEL_SERVICE_NAME
           value: "llm-svc"
+        - name: DASH0_PROMETHEUS_URL
+          value: "https://api.us-west-2.aws.dash0.com/api/prometheus"
+        - name: DASH0_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: dash0-secret
+              key: auth-token
         resources:
           requests:
             cpu: "250m"
