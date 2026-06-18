@@ -15,96 +15,88 @@
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; }
-  
+
   nav { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 4px; overflow-x: auto; }
   nav button { background: none; border: none; color: var(--text2); padding: 14px 18px; cursor: pointer; font-size: 13px; white-space: nowrap; border-bottom: 2px solid transparent; transition: all 0.2s; }
   nav button:hover { color: var(--white); }
   nav button.active { color: var(--teal); border-bottom-color: var(--teal); }
-  
+
   .tab { display: none; padding: 24px; max-width: 1100px; margin: 0 auto; }
   .tab.active { display: block; }
-  
+
   h1 { font-size: 20px; color: var(--white); margin-bottom: 6px; }
-  h2 { font-size: 15px; color: var(--teal); margin: 24px 0 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+  h2 { font-size: 13px; color: var(--teal); margin: 24px 0 10px; text-transform: uppercase; letter-spacing: 0.06em; }
   p { color: var(--text2); font-size: 13px; line-height: 1.6; margin-bottom: 16px; }
-  
-  /* Node boxes */
+
   .grid { display: grid; gap: 12px; }
   .g2 { grid-template-columns: 1fr 1fr; }
   .g3 { grid-template-columns: 1fr 1fr 1fr; }
-  .g4 { grid-template-columns: repeat(4, 1fr); }
-  
-  .node { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; cursor: pointer; transition: all 0.2s; position: relative; }
-  .node:hover { border-color: var(--border2); transform: translateY(-1px); }
-  .node .label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+  .g4 { grid-template-columns: repeat(4,1fr); }
+
+  .node { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .node .label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 5px; }
   .node .name { font-size: 14px; font-weight: 600; color: var(--white); margin-bottom: 4px; }
-  .node .detail { font-size: 12px; color: var(--text2); }
-  
-  .c-teal .label { color: var(--teal); } .c-teal { border-left: 3px solid var(--teal); }
-  .c-blue .label { color: var(--blue); } .c-blue { border-left: 3px solid var(--blue); }
-  .c-purple .label { color: var(--purple); } .c-purple { border-left: 3px solid var(--purple); }
-  .c-amber .label { color: var(--amber); } .c-amber { border-left: 3px solid var(--amber); }
-  .c-coral .label { color: var(--coral); } .c-coral { border-left: 3px solid var(--coral); }
-  .c-green .label { color: var(--green); } .c-green { border-left: 3px solid var(--green); }
-  .c-red .label { color: var(--red); } .c-red { border-left: 3px solid var(--red); }
-  .c-gray .label { color: var(--gray); } .c-gray { border-left: 3px solid var(--gray); }
-  
-  /* Arrow connectors */
-  .flow { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
-  .flow .arr { flex: 1; height: 1px; background: var(--border2); position: relative; }
-  .flow .arr::after { content: '▶'; position: absolute; right: -6px; top: -7px; font-size: 10px; color: var(--border2); }
-  .flow .proto { font-size: 11px; color: var(--text2); white-space: nowrap; }
-  
-  /* Waterfall */
+  .node .detail { font-size: 12px; color: var(--text2); line-height: 1.5; }
+
+  .c-teal  { border-left: 3px solid var(--teal);   } .c-teal  .label { color: var(--teal);   }
+  .c-blue  { border-left: 3px solid var(--blue);   } .c-blue  .label { color: var(--blue);   }
+  .c-purple{ border-left: 3px solid var(--purple); } .c-purple .label{ color: var(--purple); }
+  .c-amber { border-left: 3px solid var(--amber);  } .c-amber .label { color: var(--amber);  }
+  .c-coral { border-left: 3px solid var(--coral);  } .c-coral .label { color: var(--coral);  }
+  .c-green { border-left: 3px solid var(--green);  } .c-green .label { color: var(--green);  }
+  .c-red   { border-left: 3px solid var(--red);    } .c-red   .label { color: var(--red);    }
+  .c-gray  { border-left: 3px solid var(--gray);   } .c-gray  .label { color: var(--gray);   }
+
   .waterfall { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; font-family: monospace; }
-  .wf-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+  .wf-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--border); }
   .wf-row:last-child { border-bottom: none; }
-  .wf-indent { display: inline-block; }
   .wf-name { font-size: 12px; color: var(--white); flex: 1; }
-  .wf-svc { font-size: 11px; color: var(--text2); width: 80px; }
-  .wf-dur { font-size: 11px; color: var(--teal); width: 70px; text-align: right; }
-  .wf-bar { height: 6px; border-radius: 3px; background: var(--teal); opacity: 0.7; }
-  
-  /* Stat cards */
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+  .wf-svc  { font-size: 11px; color: var(--text2); width: 90px; }
+  .wf-dur  { font-size: 11px; color: var(--teal); width: 70px; text-align: right; }
+  .wf-bar  { height: 6px; border-radius: 3px; background: var(--teal); opacity: 0.7; min-width: 2px; }
+
+  .stats { display: grid; grid-template-columns: repeat(5,1fr); gap: 12px; margin-bottom: 24px; }
   .stat { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; text-align: center; }
-  .stat .val { font-size: 28px; font-weight: 700; color: var(--teal); }
+  .stat .val { font-size: 26px; font-weight: 700; color: var(--teal); }
   .stat .lbl { font-size: 11px; color: var(--text2); margin-top: 4px; }
-  
-  /* Table */
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 16px; }
   th { background: var(--bg3); color: var(--text2); padding: 8px 12px; text-align: left; font-weight: 600; }
   td { padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--text); }
   .ok { color: var(--green); } .no { color: var(--red); } .soon { color: var(--amber); }
-  
-  /* Phase badges */
+
   .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
   .badge-done { background: rgba(34,197,94,0.15); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
   .badge-next { background: rgba(251,191,36,0.15); color: var(--amber); border: 1px solid rgba(251,191,36,0.3); }
   .badge-plan { background: rgba(107,114,128,0.15); color: var(--gray); border: 1px solid rgba(107,114,128,0.3); }
-  
+
   .box { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 12px; }
   .box-title { font-size: 13px; font-weight: 600; color: var(--white); margin-bottom: 8px; }
   code { background: var(--bg3); color: var(--teal); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-family: monospace; }
-  
-  @media (max-width: 600px) { .g2, .g3, .g4, .stats { grid-template-columns: 1fr; } }
+
+  .signal-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .signal-row:last-child { border-bottom: none; }
+  .signal-val { font-weight: 700; color: var(--red); }
+  .signal-val.ok { color: var(--green); }
+
+  @media (max-width: 700px) { .g2,.g3,.g4,.stats { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
 
 <nav>
-  <button class="active" onclick="show('arch')">1. Architecture</button>
-  <button onclick="show('flow')">2. Data Flow</button>
-  <button onclick="show('concept')">3. Concept</button>
-  <button onclick="show('exec')">4. Executive Summary</button>
+  <button class="active" onclick="show('arch',this)">1. Architecture</button>
+  <button onclick="show('flow',this)">2. Data Flow</button>
+  <button onclick="show('concept',this)">3. Concept</button>
+  <button onclick="show('exec',this)">4. Executive Summary</button>
 </nav>
 
-<!-- TAB 1: ARCHITECTURE -->
+<!-- ═══════════════════════════════════════════════════════ TAB 1: ARCHITECTURE -->
 <div id="arch" class="tab active">
-  <h1>System Architecture</h1>
-  <p>Three-service application on AWS EKS with Cilium CNI. Gateway and product-svc on separate nodes for cross-node flow visibility.</p>
+  <h1>System Architecture — Phases 1–5</h1>
+  <p>Three-service application on AWS EKS. Cross-node placement enables Hubble flow visibility. llm-svc adds Bedrock + Dash0 AIOps layer.</p>
 
-  <h2>Internet → EKS</h2>
+  <h2>Internet ingress</h2>
   <div class="grid g2">
     <div class="node c-blue">
       <div class="label">Load Balancer</div>
@@ -112,131 +104,188 @@
       <div class="detail">a1ebab3c….elb.amazonaws.com</div>
     </div>
     <div class="node c-gray">
-      <div class="label">VPC</div>
+      <div class="label">VPC · us-east-2</div>
       <div class="name">otel-lab-vpc</div>
       <div class="detail">vpc-00a1138c8d1c4d109 · 10.0.0.0/16</div>
     </div>
   </div>
 
-  <h2>Node C — us-east-2c (10.0.3.x)</h2>
+  <h2>Node C — us-east-2c — 10.0.3.x</h2>
   <div class="grid g3">
     <div class="node c-teal">
-      <div class="label">App · :8000</div>
+      <div class="label">App · :8000 · ConfigMap</div>
       <div class="name">gateway</div>
-      <div class="detail">10.0.3.146 · FastAPI · OTel SDK</div>
+      <div class="detail">10.0.3.146 · FastAPI · OTel SDK<br>/products  /recommendations  /diagnose</div>
     </div>
     <div class="node c-purple">
       <div class="label">Database · :5432</div>
       <div class="name">postgres-0</div>
-      <div class="detail">10.0.3.162 · PostgreSQL StatefulSet</div>
+      <div class="detail">10.0.3.162 · StatefulSet · seed data</div>
     </div>
     <div class="node c-amber">
-      <div class="label">eBPF · DaemonSet</div>
+      <div class="label">Telemetry · DaemonSet</div>
       <div class="name">otelcol node C</div>
-      <div class="detail">10.0.3.86 · v0.154.0</div>
+      <div class="detail">v0.154.0 · OTLP recv · Prom scrape · Dash0 export</div>
     </div>
   </div>
 
-  <h2>Node B — us-east-2b (10.0.2.x) ← cross-node flows here</h2>
+  <h2>Node B — us-east-2b — 10.0.2.x ← cross-node flows captured here</h2>
   <div class="grid g3">
     <div class="node c-coral">
-      <div class="label">App · :8001</div>
+      <div class="label">App · :8001 · ConfigMap</div>
       <div class="name">product-svc</div>
-      <div class="detail">10.0.2.183 · FastAPI · psycopg2</div>
+      <div class="detail">10.0.2.183 · FastAPI · psycopg2 · OTel SDK</div>
     </div>
     <div class="node c-green">
-      <div class="label">App · :8002 · Phase 4</div>
+      <div class="label">App · :8002 · ECR · Phase 4+5</div>
       <div class="name">llm-svc</div>
-      <div class="detail">10.0.2.155 · Bedrock Converse API</div>
+      <div class="detail">10.0.2.155 · Bedrock Converse API<br>/recommendations  /diagnose (AIOps)</div>
     </div>
     <div class="node c-amber">
-      <div class="label">eBPF · DaemonSet</div>
+      <div class="label">Telemetry · DaemonSet</div>
       <div class="name">otelcol node B</div>
-      <div class="detail">10.0.2.110 · v0.154.0</div>
+      <div class="detail">v0.154.0 · OTLP recv · Prom scrape · Dash0 export</div>
     </div>
   </div>
 
-  <h2>eBPF Layer — All Nodes</h2>
+  <h2>eBPF layer — all nodes</h2>
   <div class="grid g2">
     <div class="node c-blue">
       <div class="label">CNI · eBPF</div>
       <div class="name">Cilium 1.19.4 + Hubble</div>
-      <div class="detail">socket_filter mode · hubble_drop_total · POLICY_DENY</div>
+      <div class="detail">socket_filter mode · hubble_drop_total · POLICY_DENY verdicts · hubble_flows_processed_total</div>
     </div>
     <div class="node c-purple">
       <div class="label">Auto-instrument · DaemonSet</div>
       <div class="name">Beyla 3.20.0</div>
-      <div class="detail">L7 spans · beyla_network_flow_bytes · socket_filter</div>
+      <div class="detail">L7 RED spans · beyla_network_flow_bytes · socket_filter (Cilium-compatible)</div>
     </div>
   </div>
 
-  <h2>Observability Backend</h2>
-  <div class="node c-teal">
-    <div class="label">SaaS Backend</div>
-    <div class="name">Dash0 — org: Surit_org_1</div>
-    <div class="detail">ingress.us-west-2.aws.dash0.com:4317 · Traces · Metrics · Logs</div>
+  <h2>Observability backend + AIOps query layer</h2>
+  <div class="grid g2">
+    <div class="node c-teal">
+      <div class="label">SaaS · OTLP-native</div>
+      <div class="name">Dash0 — Surit_org_1</div>
+      <div class="detail">ingress.us-west-2.aws.dash0.com:4317<br>Traces · Metrics · Logs · PromQL API</div>
+    </div>
+    <div class="node c-green">
+      <div class="label">Phase 5 · AIOps</div>
+      <div class="name">Dash0 Prometheus API</div>
+      <div class="detail">api.us-west-2.aws.dash0.com/api/prometheus<br>queried by llm-svc /diagnose endpoint</div>
+    </div>
   </div>
 </div>
 
-<!-- TAB 2: DATA FLOW -->
+<!-- ═══════════════════════════════════════════════════════ TAB 2: DATA FLOW -->
 <div id="flow" class="tab">
-  <h1>Instrumentation & Data Flow</h1>
-  <p>Six signal sources feeding one OTel Collector pipeline, exporting to Dash0 via OTLP/gRPC.</p>
+  <h1>Instrumentation & Data Flow — Phases 1–5</h1>
+  <p>Six signal sources → one OTel Collector pipeline → Dash0. Phase 5 adds a feedback loop: Dash0 Prometheus API → llm-svc → Bedrock RCA.</p>
 
-  <h2>Phase 4 Trace Waterfall — GET /recommendations</h2>
+  <h2>Phase 4 trace waterfall — GET /recommendations (936ms)</h2>
   <div class="waterfall">
     <div class="wf-row">
-      <div class="wf-name"><span class="wf-indent" style="width:0px"></span>GET /recommendations</div>
+      <div class="wf-name">GET /recommendations</div>
       <div class="wf-svc" style="color:var(--teal)">gateway</div>
       <div class="wf-dur">936ms</div>
       <div class="wf-bar" style="width:100%"></div>
     </div>
     <div class="wf-row">
-      <div class="wf-name"><span class="wf-indent" style="width:12px;display:inline-block"></span>↳ GET /recommendations</div>
+      <div class="wf-name">&nbsp;&nbsp;↳ GET /recommendations (client)</div>
       <div class="wf-svc" style="color:var(--teal)">gateway</div>
       <div class="wf-dur">924ms</div>
       <div class="wf-bar" style="width:99%"></div>
     </div>
     <div class="wf-row">
-      <div class="wf-name"><span class="wf-indent" style="width:24px;display:inline-block"></span>↳ GET /recommendations</div>
+      <div class="wf-name">&nbsp;&nbsp;&nbsp;&nbsp;↳ GET /recommendations</div>
       <div class="wf-svc" style="color:var(--green)">llm-svc</div>
       <div class="wf-dur">928ms</div>
       <div class="wf-bar" style="width:98%"></div>
     </div>
     <div class="wf-row">
-      <div class="wf-name"><span class="wf-indent" style="width:36px;display:inline-block"></span>↳ <strong style="color:var(--amber)">bedrock.converse</strong></div>
-      <div class="wf-svc" style="color:var(--green)">llm-svc</div>
+      <div class="wf-name">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↳ <strong style="color:var(--amber)">bedrock.converse</strong></div>
+      <div class="wf-svc" style="color:var(--amber)">llm-svc</div>
       <div class="wf-dur" style="color:var(--amber)">856ms</div>
       <div class="wf-bar" style="width:91%;background:var(--amber)"></div>
     </div>
     <div class="wf-row">
-      <div class="wf-name"><span class="wf-indent" style="width:36px;display:inline-block"></span>↳ GET /products</div>
+      <div class="wf-name">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↳ GET /products</div>
       <div class="wf-svc" style="color:var(--coral)">product-svc</div>
       <div class="wf-dur">36ms</div>
       <div class="wf-bar" style="width:4%"></div>
     </div>
     <div class="wf-row">
-      <div class="wf-name"><span class="wf-indent" style="width:48px;display:inline-block"></span>↳ SELECT products</div>
+      <div class="wf-name">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↳ SELECT products</div>
       <div class="wf-svc" style="color:var(--purple)">postgres</div>
       <div class="wf-dur">2ms</div>
       <div class="wf-bar" style="width:1%"></div>
     </div>
   </div>
 
-  <h2>gen_ai.* Span Attributes (Phase 4)</h2>
+  <h2>Phase 5 AIOps loop — GET /diagnose (2,261ms during fault)</h2>
+  <div class="waterfall">
+    <div class="wf-row">
+      <div class="wf-name">GET /diagnose?window=2m</div>
+      <div class="wf-svc" style="color:var(--teal)">gateway</div>
+      <div class="wf-dur">2,261ms</div>
+      <div class="wf-bar" style="width:100%;background:var(--red)"></div>
+    </div>
+    <div class="wf-row">
+      <div class="wf-name">&nbsp;&nbsp;↳ diagnose.rca</div>
+      <div class="wf-svc" style="color:var(--green)">llm-svc</div>
+      <div class="wf-dur">~2,200ms</div>
+      <div class="wf-bar" style="width:97%;background:var(--red)"></div>
+    </div>
+    <div class="wf-row">
+      <div class="wf-name">&nbsp;&nbsp;&nbsp;&nbsp;↳ Dash0 API: hubble_drop_total</div>
+      <div class="wf-svc" style="color:var(--blue)">Dash0</div>
+      <div class="wf-dur">~80ms</div>
+      <div class="wf-bar" style="width:4%"></div>
+    </div>
+    <div class="wf-row">
+      <div class="wf-name">&nbsp;&nbsp;&nbsp;&nbsp;↳ Dash0 API: http error rate</div>
+      <div class="wf-svc" style="color:var(--blue)">Dash0</div>
+      <div class="wf-dur">~80ms</div>
+      <div class="wf-bar" style="width:4%"></div>
+    </div>
+    <div class="wf-row">
+      <div class="wf-name">&nbsp;&nbsp;&nbsp;&nbsp;↳ Dash0 API: flow bytes</div>
+      <div class="wf-svc" style="color:var(--blue)">Dash0</div>
+      <div class="wf-dur">~80ms</div>
+      <div class="wf-bar" style="width:4%"></div>
+    </div>
+    <div class="wf-row">
+      <div class="wf-name">&nbsp;&nbsp;&nbsp;&nbsp;↳ <strong style="color:var(--amber)">bedrock.converse (RCA)</strong></div>
+      <div class="wf-svc" style="color:var(--amber)">Bedrock</div>
+      <div class="wf-dur">~1,900ms</div>
+      <div class="wf-bar" style="width:84%;background:var(--amber)"></div>
+    </div>
+  </div>
+
+  <h2>Phase 5 signals during CiliumNetworkPolicy fault</h2>
+  <div class="box">
+    <div class="box-title">Real signals queried from Dash0 Prometheus API</div>
+    <div class="signal-row"><span>hubble_policy_deny_drops</span><span class="signal-val">184.0 drops</span></div>
+    <div class="signal-row"><span>http_5xx_count</span><span class="signal-val">8.73 errors</span></div>
+    <div class="signal-row"><span>http_total_count</span><span>36.34 requests</span></div>
+    <div class="signal-row"><span>http_error_rate_pct</span><span class="signal-val">24.0%</span></div>
+    <div class="signal-row"><span>network_flow_bytes</span><span>172,089 bytes</span></div>
+  </div>
+
+  <h2>gen_ai.* span attributes — bedrock.converse</h2>
   <div class="grid g2">
     <div class="box">
-      <div class="box-title">Request attributes</div>
+      <div class="box-title">Request</div>
       <div style="font-family:monospace;font-size:12px;line-height:2">
         <code>gen_ai.system</code> = aws.bedrock<br>
         <code>gen_ai.operation.name</code> = chat<br>
         <code>gen_ai.request.model</code> = us.amazon.nova-micro-v1:0<br>
         <code>gen_ai.request.temperature</code> = 0.3<br>
-        <code>gen_ai.request.max_tokens</code> = 256
+        <code>gen_ai.request.max_tokens</code> = 512
       </div>
     </div>
     <div class="box">
-      <div class="box-title">Response attributes</div>
+      <div class="box-title">Response</div>
       <div style="font-family:monospace;font-size:12px;line-height:2">
         <code>gen_ai.usage.input_tokens</code> = 123<br>
         <code>gen_ai.usage.output_tokens</code> = 62<br>
@@ -247,122 +296,138 @@
     </div>
   </div>
 
-  <h2>Signal Sources → OTel Collector → Dash0</h2>
+  <h2>Signal pipeline</h2>
   <table>
-    <tr><th>Source</th><th>Signal type</th><th>Protocol</th><th>Destination</th></tr>
-    <tr><td>gateway OTel SDK</td><td>Traces + Logs</td><td>OTLP/gRPC</td><td>otelcol node C</td></tr>
-    <tr><td>product-svc OTel SDK</td><td>Traces + DB spans</td><td>OTLP/gRPC</td><td>otelcol node B</td></tr>
-    <tr><td>llm-svc OTel SDK</td><td>Traces + gen_ai.* spans</td><td>OTLP/gRPC</td><td>otelcol node B</td></tr>
-    <tr><td>Beyla DaemonSet</td><td>L7 spans + flow bytes</td><td>OTLP/gRPC</td><td>otelcol (local node)</td></tr>
-    <tr><td>Hubble Prometheus</td><td>hubble_drop_total</td><td>Prometheus scrape</td><td>otelcol (local node)</td></tr>
-    <tr><td>hostmetrics</td><td>CPU/disk/network</td><td>internal</td><td>otelcol (local node)</td></tr>
-    <tr><td>OTel Collector ×3</td><td>All signals</td><td>OTLP/gRPC</td><td>Dash0</td></tr>
+    <tr><th>Source</th><th>Signal</th><th>Protocol</th><th>Collector</th><th>Dash0</th></tr>
+    <tr><td>gateway SDK</td><td>Traces + Logs</td><td>OTLP/gRPC</td><td>node C</td><td>Tracing + Logging</td></tr>
+    <tr><td>product-svc SDK</td><td>Traces + SQL spans</td><td>OTLP/gRPC</td><td>node B</td><td>Tracing</td></tr>
+    <tr><td>llm-svc SDK</td><td>Traces + gen_ai.* + diagnose.rca</td><td>OTLP/gRPC</td><td>node B</td><td>Tracing + Gen AI spans</td></tr>
+    <tr><td>Beyla DaemonSet</td><td>L7 RED spans + flow bytes</td><td>OTLP/gRPC</td><td>local node</td><td>Tracing + Metrics</td></tr>
+    <tr><td>Hubble Prometheus</td><td>hubble_drop_total + flows</td><td>Prometheus</td><td>local node</td><td>Metrics</td></tr>
+    <tr><td>hostmetrics</td><td>CPU/disk/network</td><td>internal</td><td>local node</td><td>Metrics</td></tr>
+    <tr><td><strong>Dash0 Prom API</strong></td><td><strong>All metrics (read)</strong></td><td><strong>HTTPS/PromQL</strong></td><td><strong>llm-svc</strong></td><td><strong>Phase 5 AIOps loop</strong></td></tr>
   </table>
 </div>
 
-<!-- TAB 3: CONCEPT -->
+<!-- ═══════════════════════════════════════════════════════ TAB 3: CONCEPT -->
 <div id="concept" class="tab">
   <h1>Concept Diagram — The Observability Bridge</h1>
-  <p>The gap between APM and network observability is the root cause of long bridge calls. This architecture closes it.</p>
+  <p>The thesis: App observability tells you something is broken. Network observability tells you why. The OTel pipeline is the bridge. Phase 5 adds the LLM that reads both and explains it in plain English.</p>
 
-  <h2>The Three Layers</h2>
+  <h2>The three-layer stack</h2>
   <div class="grid g3">
     <div class="node c-teal">
       <div class="label">Layer 1 — Application</div>
-      <div class="name">OTel SDK + OpenLLMetry</div>
-      <div class="detail">Traces · Logs · gen_ai.* spans · Cost per request</div>
+      <div class="name">OTel SDK</div>
+      <div class="detail">Traces · Logs · HTTP spans · SQL spans<br>Sees symptoms: 5,016ms timeout, 502 error</div>
     </div>
     <div class="node c-blue">
       <div class="label">Layer 2 — Network</div>
       <div class="name">Cilium Hubble + Beyla</div>
-      <div class="detail">Flow bytes · POLICY_DENY · L7 spans · TCP timing</div>
+      <div class="detail">Flow bytes · POLICY_DENY drops · L7 spans<br>Sees cause: 184 TCP drops on port 8001</div>
     </div>
-    <div class="node c-purple">
-      <div class="label">Layer 3 — Infrastructure</div>
-      <div class="name">hostmetrics + OTel Collector</div>
-      <div class="detail">CPU · Memory · Disk · One pipeline for all signals</div>
+    <div class="node c-green">
+      <div class="label">Layer 3 — AIOps (Phase 5)</div>
+      <div class="name">LLM RCA Engine</div>
+      <div class="detail">Reads Dash0 Prometheus API · Asks Bedrock<br>Explains: "CiliumNetworkPolicy blocking gateway→product-svc"</div>
     </div>
   </div>
 
-  <h2>The Blindspot — Phase 3 Proof</h2>
+  <h2>The blindspot — Phase 3 smoking gun</h2>
   <div class="grid g2">
     <div class="node c-red">
       <div class="label">APM sees (symptoms only)</div>
-      <div class="name">5,016ms timeout · 502 error</div>
-      <div class="detail">No product-svc span · No SQL span · No root cause</div>
+      <div class="name">5,016ms timeout · 502 error · 90 errors</div>
+      <div class="detail">No product-svc child span · No SQL span<br>Zero root cause information</div>
     </div>
     <div class="node c-green">
       <div class="label">eBPF sees (root cause)</div>
-      <div class="name">TCP POLICY_DENY · port 8001</div>
-      <div class="detail">gateway → product-svc blocked · hubble_drop_total spike</div>
+      <div class="name">184 TCP POLICY_DENY drops · port 8001</div>
+      <div class="detail">gateway → product-svc blocked<br>hubble_drop_total spike visible in Dash0</div>
     </div>
   </div>
 
-  <h2>The GenAI Layer — Phase 4 Addition</h2>
-  <div class="node c-amber">
-    <div class="label">New in Phase 4 — LLM Observability</div>
-    <div class="name">bedrock.converse span — 856ms · 123 input tokens · $0.0000309</div>
-    <div class="detail">Same trace waterfall now includes LLM latency alongside DB latency. Token cost visible per request. Temperature recorded as span attribute.</div>
+  <h2>Phase 5 — the AIOps loop</h2>
+  <div class="box">
+    <div class="box-title">How /diagnose works end to end</div>
+    <div style="font-size:13px;line-height:2;color:var(--text2)">
+      1. <strong style="color:var(--white)">Fault injected</strong> — CiliumNetworkPolicy blocks gateway→product-svc:8001<br>
+      2. <strong style="color:var(--white)">Signals flow</strong> — hubble_drop_total spikes in Dash0, OTel SDK records 502 errors<br>
+      3. <strong style="color:var(--white)">GET /diagnose</strong> — llm-svc queries Dash0 Prometheus API for 4 signals<br>
+      4. <strong style="color:var(--white)">Bedrock called</strong> — signals + SRE context prompt → Nova Micro<br>
+      5. <strong style="color:var(--white)">RCA returned in 2.2s</strong> — root cause, confidence, evidence, kubectl command<br>
+      6. <strong style="color:var(--white)">Bridge call avoided</strong> — what used to take 45 minutes now takes 2 seconds
+    </div>
   </div>
 
-  <h2>What No One Has Built Yet</h2>
+  <h2>Beyla TCP retransmit — verified finding</h2>
+  <div class="box">
+    <div class="box-title">Gemini hallucinated — verified June 17, 2026 against Grafana docs</div>
+    <p style="margin:0;font-size:12px">Beyla 3.20.0 exposes only <code>beyla_network_flow_bytes</code> at its Prometheus endpoint. The <code>tcp_retransmit_skb</code> tracepoint is used internally for L7 span correlation but is NOT a user-facing metric. TCP retransmit visibility requires a custom eBPF program — a Phase 6 contribution opportunity.</p>
+  </div>
+
+  <h2>What is still unbuilt (Phases 6–7)</h2>
   <div class="grid g2">
     <div class="node c-purple">
-      <div class="label">The gap (Phase 6)</div>
+      <div class="label">Phase 6 — unique contribution</div>
       <div class="name">On-prem NetFlow → OTel → Dash0</div>
-      <div class="detail">Riverbed/Arista on-prem flows + cloud eBPF flows in same backend. No open reference architecture exists.</div>
+      <div class="detail">k3s + Riverbed/Arista NetFlow receiver in OTel Collector → same Dash0 backend as cloud eBPF. No published open reference architecture exists.</div>
     </div>
     <div class="node c-blue">
-      <div class="label">The gap (Phase 7)</div>
+      <div class="label">Phase 7 — enterprise proof</div>
       <div class="name">Same pipeline → Dynatrace + Datadog</div>
-      <div class="detail">Prove OTel is backend-agnostic at enterprise scale. One collector config, three backends.</div>
+      <div class="detail">One OTel Collector config → three backends. Proves vendor-agnostic architecture at enterprise scale.</div>
     </div>
-  </div>
-
-  <h2>Beyla TCP Retransmit — Verified Finding</h2>
-  <div class="box">
-    <div class="box-title">Gemini hallucinated — verified June 17, 2026</div>
-    <p style="margin:0">Beyla 3.20.0 exposes only <code>beyla_network_flow_bytes_total</code> at its Prometheus endpoint. The <code>tcp_retransmit_skb</code> tracepoint is used internally for L7 correlation but NOT exposed as a user metric. TCP retransmit visibility requires a custom eBPF program — a Phase 6 opportunity.</p>
   </div>
 </div>
 
-<!-- TAB 4: EXECUTIVE SUMMARY -->
+<!-- ═══════════════════════════════════════════════════════ TAB 4: EXECUTIVE SUMMARY -->
 <div id="exec" class="tab">
-  <h1>Executive Summary</h1>
-  <p>Reference architecture bridging on-prem network observability and cloud-native eBPF through a single OTel pipeline. 4 of 8 phases complete.</p>
+  <h1>Executive Summary — Phases 1–5 Complete</h1>
+  <p>Open reference architecture bridging on-prem network observability and cloud-native eBPF through a single OTel pipeline, with LLM-powered root cause analysis. 5 of 8 phases complete.</p>
 
   <div class="stats">
-    <div class="stat"><div class="val">4</div><div class="lbl">Phases complete</div></div>
+    <div class="stat"><div class="val">5</div><div class="lbl">Phases complete</div></div>
     <div class="stat"><div class="val">913</div><div class="lbl">Spans in Dash0</div></div>
-    <div class="stat"><div class="val">856ms</div><div class="lbl">Bedrock p50 latency</div></div>
-    <div class="stat"><div class="val">$0.000031</div><div class="lbl">Cost per LLM call</div></div>
+    <div class="stat"><div class="val">2.2s</div><div class="lbl">RCA time (Phase 5)</div></div>
+    <div class="stat"><div class="val">184</div><div class="lbl">Policy drops detected</div></div>
+    <div class="stat"><div class="val">24%</div><div class="lbl">Error rate during fault</div></div>
   </div>
 
-  <h2>Phase Status</h2>
+  <h2>Phase 5 RCA result — during CiliumNetworkPolicy fault</h2>
+  <div class="box">
+    <div class="box-title" style="color:var(--red)">ROOT CAUSE (high confidence · critical severity)</div>
+    <p style="margin:8px 0 4px;color:var(--white);font-size:14px">"The Cilium network policy is blocking necessary traffic between the gateway and product-svc services."</p>
+    <p style="margin:0;font-size:12px">RECOMMENDATION: <code>kubectl get ciliumnetworkpolicy -o json | jq '.items[]'</code></p>
+    <p style="margin:4px 0 0;font-size:12px;color:var(--text2)">Time to diagnosis: 2,261ms · Bedrock Nova Micro · Dash0 Prometheus API · 4 signal queries</p>
+  </div>
+
+  <h2>Phase roadmap</h2>
   <table>
-    <tr><th>Phase</th><th>Title</th><th>Status</th><th>Key output</th></tr>
-    <tr><td>1</td><td>Foundation</td><td><span class="badge badge-done">✓ DONE</span></td><td>EKS + Cilium + Terraform + GitHub CI</td></tr>
-    <tr><td>2</td><td>Full MELT</td><td><span class="badge badge-done">✓ DONE</span></td><td>OTel SDK + Beyla + Hubble in Dash0</td></tr>
-    <tr><td>3</td><td>Network Blindspot</td><td><span class="badge badge-done">✓ DONE</span></td><td>TCP POLICY_DENY smoking gun in Dash0</td></tr>
-    <tr><td>4</td><td>GenAI Observability</td><td><span class="badge badge-done">✓ DONE</span></td><td>bedrock.converse span + gen_ai.* attributes</td></tr>
-    <tr><td>5</td><td>AIOps Layer</td><td><span class="badge badge-next">NEXT</span></td><td>Adaptive baselines, anomaly detection</td></tr>
-    <tr><td>6</td><td>Hybrid / On-prem</td><td><span class="badge badge-plan">PLANNED</span></td><td>k3s + NetFlow/sFlow via OTel — unique contribution</td></tr>
+    <tr><th>Phase</th><th>Title</th><th>Status</th><th>Key outcome</th></tr>
+    <tr><td>1</td><td>Foundation</td><td><span class="badge badge-done">✓ DONE</span></td><td>EKS + Cilium + Terraform IaC + GitHub CI</td></tr>
+    <tr><td>2</td><td>Full MELT</td><td><span class="badge badge-done">✓ DONE</span></td><td>OTel SDK + Beyla + Hubble → Dash0</td></tr>
+    <tr><td>3</td><td>Network Blindspot</td><td><span class="badge badge-done">✓ DONE</span></td><td>TCP POLICY_DENY smoking gun · 5,016ms trace</td></tr>
+    <tr><td>4</td><td>GenAI Observability</td><td><span class="badge badge-done">✓ DONE</span></td><td>bedrock.converse span · gen_ai.* attributes · cost tracking</td></tr>
+    <tr><td>5</td><td>AIOps RCA</td><td><span class="badge badge-done">✓ DONE</span></td><td>LLM reads Dash0 signals · root cause in 2.2s</td></tr>
+    <tr><td>6</td><td>Hybrid / On-prem</td><td><span class="badge badge-next">NEXT</span></td><td>k3s + NetFlow/sFlow via OTel · unique contribution</td></tr>
     <tr><td>7</td><td>Multi-backend</td><td><span class="badge badge-plan">PLANNED</span></td><td>Dynatrace + Datadog + Dash0 comparison</td></tr>
-    <tr><td>8</td><td>Public packaging</td><td><span class="badge badge-plan">PLANNED</span></td><td>README + one-click deploy + Substack</td></tr>
+    <tr><td>8</td><td>Public packaging</td><td><span class="badge badge-plan">PLANNED</span></td><td>README + one-click deploy + Substack series</td></tr>
   </table>
 
-  <h2>Signal Coverage</h2>
+  <h2>Signal coverage</h2>
   <table>
-    <tr><th>Signal</th><th>OTel SDK</th><th>Beyla eBPF</th><th>Hubble</th><th>OpenLLMetry</th></tr>
-    <tr><td>HTTP latency</td><td class="ok">✓ spans</td><td class="ok">✓ RED metrics</td><td class="ok">✓ flow bytes</td><td>—</td></tr>
-    <tr><td>DB queries</td><td class="ok">✓ SQL spans</td><td class="ok">✓ L7 span</td><td class="ok">✓ bytes</td><td>—</td></tr>
-    <tr><td>Policy drops</td><td class="no">✗</td><td class="no">✗</td><td class="ok">✓ POLICY_DENY</td><td>—</td></tr>
-    <tr><td>TCP retransmits</td><td class="no">✗</td><td class="no">✗ (verified)</td><td class="no">✗</td><td>—</td></tr>
-    <tr><td>LLM tokens/cost</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="ok">✓ Phase 4</td></tr>
-    <tr><td>NetFlow on-prem</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="soon">Phase 6</td></tr>
+    <tr><th>Signal</th><th>OTel SDK</th><th>Beyla eBPF</th><th>Hubble</th><th>gen_ai.*</th><th>AIOps RCA</th></tr>
+    <tr><td>HTTP latency</td><td class="ok">✓ spans</td><td class="ok">✓ RED</td><td class="ok">✓ bytes</td><td>—</td><td class="ok">✓ queried</td></tr>
+    <tr><td>DB queries</td><td class="ok">✓ SQL spans</td><td class="ok">✓ L7</td><td class="ok">✓ bytes</td><td>—</td><td>—</td></tr>
+    <tr><td>Policy drops</td><td class="no">✗</td><td class="no">✗</td><td class="ok">✓ POLICY_DENY</td><td>—</td><td class="ok">✓ queried</td></tr>
+    <tr><td>TCP retransmits</td><td class="no">✗</td><td class="no">✗ verified</td><td class="no">✗</td><td>—</td><td class="soon">Phase 6</td></tr>
+    <tr><td>LLM tokens/cost</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="ok">✓ Phase 4</td><td class="ok">✓ tracked</td></tr>
+    <tr><td>Root cause text</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="ok">✓ Phase 5</td></tr>
+    <tr><td>NetFlow on-prem</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="soon">Phase 6</td></tr>
   </table>
 
-  <h2>Verified Stack</h2>
+  <h2>Verified stack</h2>
   <div class="grid g4">
     <div class="node c-gray"><div class="label">Kubernetes</div><div class="name">EKS 1.35.5</div></div>
     <div class="node c-gray"><div class="label">CNI</div><div class="name">Cilium 1.19.4</div></div>
@@ -375,17 +440,17 @@
   </div>
 
   <div style="margin-top:24px;padding:16px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;text-align:center">
-    <div style="color:var(--teal);font-size:14px;font-weight:600;margin-bottom:8px">GitHub: suritmaharana-maker/otel-observability-lab</div>
-    <div style="color:var(--text2);font-size:12px">Last updated: June 17, 2026 · Phase 4 complete · Next: Phase 5 AIOps</div>
+    <div style="color:var(--teal);font-size:14px;font-weight:600;margin-bottom:6px">github.com/suritmaharana-maker/otel-observability-lab</div>
+    <div style="color:var(--text2);font-size:12px">June 2026 · Phases 1–5 complete · Next: Phase 6 on-prem bridge</div>
   </div>
 </div>
 
 <script>
-function show(id) {
+function show(id, btn) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
   document.getElementById(id).classList.add('active');
-  event.target.classList.add('active');
+  btn.classList.add('active');
 }
 </script>
 </body>
