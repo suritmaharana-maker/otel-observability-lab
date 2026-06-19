@@ -243,7 +243,7 @@ async def diagnose(window: str = "5m", service: str = "gateway"):
                 pass
         signals["network_flow_bytes"] = round(flow_bytes, 0)
 
-        span.set_attribute("diagnose.policy_deny_drops", signals["hubble_drop_total_policy_deny"])
+        span.set_attribute("diagnose.hubble_drop_total_policy_deny", signals["hubble_drop_total_policy_deny"])
         span.set_attribute("diagnose.http_error_rate_pct", signals["http_error_rate_pct"])
         span.set_attribute("diagnose.http_5xx_count", signals["http_5xx_count"])
 
