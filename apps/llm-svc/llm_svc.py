@@ -199,7 +199,7 @@ async def diagnose(window: str = "5m", service: str = "gateway"):
                     policy_deny = float(d["value"][1]) if isinstance(d["value"], list) else float(str(d["value"]).split()[-1])
                 except Exception:
                     pass
-        signals["hubble_policy_deny_drops"] = round(policy_deny, 2)
+        signals["hubble_drop_total_policy_deny"] = round(policy_deny, 2)
 
         # HTTP error rate (Beyla RED metrics)
         err_results = await query_dash0(
@@ -243,7 +243,7 @@ async def diagnose(window: str = "5m", service: str = "gateway"):
                 pass
         signals["network_flow_bytes"] = round(flow_bytes, 0)
 
-        span.set_attribute("diagnose.policy_deny_drops", signals["hubble_policy_deny_drops"])
+        span.set_attribute("diagnose.policy_deny_drops", signals["hubble_drop_total_policy_deny"])
         span.set_attribute("diagnose.http_error_rate_pct", signals["http_error_rate_pct"])
         span.set_attribute("diagnose.http_5xx_count", signals["http_5xx_count"])
 
@@ -258,7 +258,7 @@ Analysis window: last {window}
 Target service: {service}
 
 OBSERVED SIGNALS:
-- Hubble network drops (TCP POLICY_DENY): {signals['hubble_policy_deny_drops']} drops
+- Hubble network drops (TCP POLICY_DENY): {signals['hubble_drop_total_policy_deny']} drops
 - HTTP 5xx error count: {signals['http_5xx_count']} errors
 - HTTP total requests: {signals['http_total_count']}
 - HTTP error rate: {signals['http_error_rate_pct']}%
