@@ -1,0 +1,20 @@
+apiVersion: dynatrace.com/v1beta6
+kind: DynaKube
+metadata:
+  name: dynakube
+  namespace: dynatrace
+  annotations:
+    feature.dynatrace.com/automatic-kubernetes-api-monitoring: "true"
+spec:
+  apiUrl: https://yta61562.live.dynatrace.com/api
+  metadataEnrichment:
+    enabled: true
+  oneAgent:
+    cloudNativeFullStack:
+      namespaceSelector:
+        matchLabels:
+          dynatrace-monitor: "true"
+  activeGate:
+    capabilities:
+      - kubernetes-monitoring
+      - routing
