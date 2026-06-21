@@ -1,29 +1,25 @@
 # =============================================================================
 # OTel Observability Lab — Observability Module
-# Manages: OTel Collector, Beyla, Dynatrace OneAgent, secrets, namespaces
-#
 # VERSION COMPATIBILITY (verified June 20, 2026):
 #   terraform:               >= 1.15.6
-#   hashicorp/kubernetes:    ~> 2.36.0
-#   hashicorp/helm:          ~> 2.17.0
-#   dynatrace-oss/dynatrace: ~> 1.97.0 (latest: 1.97.2, published June 10 2026)
+#   hashicorp/kubernetes:    ~> 2.36.0  (installed: 2.36.0)
+#   hashicorp/helm:          ~> 2.17.0  (installed: 2.17.0)
+#   dynatrace-oss/dynatrace: ~> 1.97.0  (installed: 1.97.2)
 #
-# TOKEN SCOPES REQUIRED (verified from Terraform Registry docs):
+# TOKEN SCOPES VERIFIED from Terraform Registry docs:
 #   dynatrace_service_anomalies_v2: settings.read + settings.write
-#   dynatrace OneAgent ingest:      metrics.ingest + logs.ingest +
+#   OTel Collector ingest:          metrics.ingest + logs.ingest +
 #                                   openTelemetryTrace.ingest + DataExport
-#   problems.read:                  for /diagnose?backend=dynatrace in llm-svc
+#   Problems API (/diagnose):       problems.read + entities.read
+#   OneAgent operator:              operator + InstallerDownload
 #
-# WHY Terraform vs Ansible:
-#   Terraform  = RESOURCES (namespaces, secrets, DaemonSets, Helm releases,
-#                           Dynatrace anomaly thresholds) — stateful, tracked
-#   Ansible    = OPERATIONS (IMDSv2 hop limit fix) — runs against live instances,
-#                not a resource, changes every ASG replacement
+# SCHEMA VERIFIED via terraform validate:
+#   load_drops + load_spikes blocks required by provider 1.97.2
+#   Semicolons not valid in HCL — all blocks fully expanded
 # =============================================================================
 
 terraform {
   required_version = ">= 1.15.6"
-
   required_providers {
     kubernetes = {
       source  = "hashicorp/kubernetes"
@@ -34,9 +30,6 @@ terraform {
       version = "~> 2.17.0"
     }
     dynatrace = {
-      # Official Dynatrace provider — supported by Dynatrace Inc.
-      # Registry: registry.terraform.io/providers/dynatrace-oss/dynatrace
-      # Latest: 1.97.2 (June 10, 2026)
       source  = "dynatrace-oss/dynatrace"
       version = "~> 1.97.0"
     }
@@ -69,9 +62,6 @@ provider "helm" {
   }
 }
 
-# Dynatrace provider
-# Verified auth variable names from docs: dt_env_url and dt_api_token
-# Token must have: settings.read + settings.write (for anomaly detection)
 provider "dynatrace" {
   dt_env_url   = "https://${var.dynatrace_environment_id}.live.dynatrace.com"
   dt_api_token = var.dynatrace_settings_token
@@ -117,8 +107,6 @@ resource "kubernetes_labels" "otel_lab_dynatrace" {
 
 # =============================================================================
 # SECRETS
-# Secret VALUES are passed as sensitive variables — never hardcoded.
-# Values provided via TF_VAR_ environment variables or terraform.tfvars (gitignored).
 # =============================================================================
 
 resource "kubernetes_secret" "dash0" {
@@ -134,7 +122,6 @@ resource "kubernetes_secret" "dash0" {
   type = "Opaque"
 }
 
-# llm-svc reads dash0-secret from otel-lab namespace
 resource "kubernetes_secret" "dash0_otel_lab" {
   count = local.dash0_enabled ? 1 : 0
   metadata {
@@ -164,7 +151,6 @@ resource "kubernetes_secret" "dynatrace" {
 
 # =============================================================================
 # OTEL COLLECTOR CONFIGMAP
-# Rendered from template — exporters included/excluded based on backends variable
 # =============================================================================
 
 resource "kubernetes_config_map" "otelcol" {
@@ -191,12 +177,16 @@ resource "kubernetes_daemon_set_v1" "otelcol" {
 
   spec {
     selector {
-      match_labels = { app = "otelcol" }
+      match_labels = {
+        app = "otelcol"
+      }
     }
 
     template {
       metadata {
-        labels = { app = "otelcol" }
+        labels = {
+          app = "otelcol"
+        }
       }
 
       spec {
@@ -206,6 +196,7 @@ resource "kubernetes_daemon_set_v1" "otelcol" {
           effect   = "NoSchedule"
           operator = "Exists"
         }
+
         toleration {
           effect   = "NoExecute"
           operator = "Exists"
@@ -317,11 +308,7 @@ resource "kubernetes_daemon_set_v1" "otelcol" {
 }
 
 # =============================================================================
-# DYNATRACE ONEA GENT — Helm release
-#
-# Verified: DynaKube v1beta6 is correct API version (checked against our cluster)
-# Helm chart: dynatrace-operator (stable repo)
-# Requires: operator token with 'operator' + 'InstallerDownload' scopes
+# DYNATRACE ONEA GENT
 # =============================================================================
 
 resource "kubernetes_namespace" "dynatrace" {
@@ -357,8 +344,6 @@ resource "kubernetes_secret" "dynakube" {
   depends_on = [helm_release.dynatrace_operator]
 }
 
-# DynaKube CR — Cloud Native Full Stack
-# Verified: v1beta6 is correct (checked kubectl get crd dynakubes.dynatrace.com)
 resource "kubernetes_manifest" "dynakube" {
   count = local.dynatrace_enabled ? 1 : 0
   manifest = {
@@ -373,11 +358,15 @@ resource "kubernetes_manifest" "dynakube" {
     }
     spec = {
       apiUrl = "https://${var.dynatrace_environment_id}.live.dynatrace.com/api"
-      metadataEnrichment = { enabled = true }
+      metadataEnrichment = {
+        enabled = true
+      }
       oneAgent = {
         cloudNativeFullStack = {
           namespaceSelector = {
-            matchLabels = { "dynatrace-monitor" = "true" }
+            matchLabels = {
+              "dynatrace-monitor" = "true"
+            }
           }
         }
       }
@@ -386,27 +375,23 @@ resource "kubernetes_manifest" "dynakube" {
       }
     }
   }
-  depends_on = [kubernetes_secret.dynakube, helm_release.dynatrace_operator]
+  depends_on = [
+    kubernetes_secret.dynakube,
+    helm_release.dynatrace_operator,
+  ]
 }
 
 # =============================================================================
 # DYNATRACE ANOMALY DETECTION
 #
-# Verified token scopes (from Terraform Registry, June 2026):
-#   dynatrace_service_anomalies_v2 requires: settings.read + settings.write
-#   These are DIFFERENT from ingest token — use dynatrace_settings_token variable
-#
-# Scope "environment" applies to ALL services — no service entity ID lookup needed.
-# This avoids the need for a dynatrace_service data source (which does not exist).
-#
-# Fixed thresholds bypass the "20% of 7 days" baselining requirement.
+# Verified token scopes: settings.read + settings.write
+# Verified required blocks (via terraform validate): load_drops + load_spikes
+# scope = "environment" applies to ALL services
+# Fixed thresholds bypass 7-day baselining requirement
 # =============================================================================
 
 resource "dynatrace_service_anomalies_v2" "environment_defaults" {
   count = local.dynatrace_enabled ? 1 : 0
-
-  # "environment" scope = applies to all services
-  # No service entity ID needed — works immediately without baseline
   scope = "environment"
 
   failure_rate {
@@ -438,5 +423,13 @@ resource "dynatrace_service_anomalies_v2" "environment_defaults" {
         slowest_degradation_milliseconds = 4000
       }
     }
+  }
+
+  load_drops {
+    enabled = false
+  }
+
+  load_spikes {
+    enabled = false
   }
 }
