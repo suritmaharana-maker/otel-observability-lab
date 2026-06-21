@@ -125,7 +125,7 @@ async def collect_dynatrace_signals(window: str, service: str) -> dict:
                 headers=headers,
                 params={
                     "from": f"now-{window}",
-                    "problemSelector": 'status("open")',
+                    
                     "fields": "+evidenceDetails,+impactAnalysis,+rootCauseEntity",
                 },
                 timeout=10.0
@@ -147,9 +147,8 @@ async def collect_dynatrace_signals(window: str, service: str) -> dict:
                     signals["davis_evidence"] = [
                         e.get("displayName", "") for e in evidence[:5]
                     ]
-                    signals["davis_root_cause_entity"] = p.get(
-                        "rootCauseEntity", {}
-                    ).get("name", "unknown")
+                    signals["davis_root_cause_entity"] = (p.get(
+                        "rootCauseEntity") or {}).get("name", "unknown")
                     signals["davis_problem_id"] = p.get("problemId", "")
                     signals["davis_status"] = p.get("status", "")
                 else:
