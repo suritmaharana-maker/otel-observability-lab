@@ -1,0 +1,92 @@
+---
+# =============================================================================
+# Ansible Playbook: Fix IMDSv2 Hop Limit for EKS Nodes
+#
+# Why Ansible (not Terraform):
+#   This is an OPERATIONAL TASK, not a resource.
+#   - IMDSv2 hop limit is not a resource that Terraform can track in state
+#   - ASG replaces instances on restart — new instances need this fix each time
+#   - Terraform would need to destroy/recreate the node group to change this
+#     setting, which would drain all pods — far too disruptive
+#   - Ansible runs against current live instances without any state concerns
+#
+# When to run:
+#   - After every cluster restart (ASG may replace instances)
+#   - After any manual instance replacement
+#   - As part of the startup runbook
+#
+# Usage:
+#   ansible-playbook ansible/fix-imds-hop-limit.yml
+#   ansible-playbook ansible/fix-imds-hop-limit.yml -e "cluster_name=otel-lab"
+#   ansible-playbook ansible/fix-imds-hop-limit.yml --check  # dry run
+#
+# Requirements:
+#   - AWS CLI configured with appropriate credentials
+#   - Ansible + amazon.aws collection: pip install ansible boto3 botocore
+#   - ansible-galaxy collection install amazon.aws
+# =============================================================================
+
+- name: Fix IMDSv2 hop limit for EKS nodes
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    cluster_name: "otel-lab"
+    aws_region: "us-east-2"
+    hop_limit: 2
+    # Required for Cilium + Bedrock to work correctly:
+    # - Cilium eBPF adds 1 hop when proxying metadata requests
+    # - Bedrock SDK makes IMDS calls for AWS credential refresh
+    # - Default hop limit of 1 means request dies after Cilium proxy
+    # - Setting to 2 allows: pod → Cilium proxy → IMDS endpoint
+
+  tasks:
+    - name: Get running EKS node instance IDs
+      amazon.aws.ec2_instance_info:
+        region: "{{ aws_region }}"
+        filters:
+          "tag:eks:cluster-name": "{{ cluster_name }}"
+          "instance-state-name": "running"
+      register: ec2_info
+
+    - name: Fail if no instances found
+      ansible.builtin.fail:
+        msg: "No running instances found for cluster {{ cluster_name }} in {{ aws_region }}"
+      when: ec2_info.instances | length == 0
+
+    - name: Display instances found
+      ansible.builtin.debug:
+        msg: "Found {{ ec2_info.instances | length }} instances: {{ ec2_info.instances | map(attribute='instance_id') | list }}"
+
+    - name: Set IMDSv2 hop limit to {{ hop_limit }} on all nodes
+      amazon.aws.ec2_metadata_options:
+        region: "{{ aws_region }}"
+        instance_id: "{{ item.instance_id }}"
+        http_endpoint: enabled
+        http_put_response_hop_limit: "{{ hop_limit }}"
+        http_tokens: required
+      loop: "{{ ec2_info.instances }}"
+      loop_control:
+        label: "{{ item.instance_id }} ({{ item.private_ip_address }})"
+      register: imds_results
+
+    - name: Verify hop limit was set correctly
+      ansible.builtin.debug:
+        msg: "✓ {{ item.item.instance_id }} ({{ item.item.private_ip_address }}) — hop limit set to {{ hop_limit }}"
+      loop: "{{ imds_results.results }}"
+      loop_control:
+        label: "{{ item.item.instance_id }}"
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: |
+          IMDSv2 hop limit fix complete.
+          Cluster: {{ cluster_name }}
+          Region: {{ aws_region }}
+          Instances updated: {{ ec2_info.instances | length }}
+          Hop limit: {{ hop_limit }}
+
+          Next steps:
+          1. Verify Bedrock works: curl http://<elb>/recommendations?query=test
+          2. Check Cilium status: kubectl get pods -n kube-system -l k8s-app=cilium

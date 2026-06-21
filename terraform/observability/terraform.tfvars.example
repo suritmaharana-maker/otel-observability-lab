@@ -1,0 +1,23 @@
+# Copy to terraform.tfvars (gitignored) and fill in values
+# NEVER commit terraform.tfvars — it contains secrets
+
+# Cluster connection — get from eks module outputs
+cluster_name           = "otel-lab"
+cluster_endpoint       = ""  # from: terraform output -raw cluster_endpoint
+cluster_ca_certificate = ""  # from: terraform output -raw cluster_certificate_authority_data
+
+# Active backends — add/remove to control which exporters are active
+# Options: "dash0", "dynatrace", "datadog"
+backends = ["dash0", "dynatrace"]
+
+# Dash0
+dash0_auth_token = ""  # from Dash0 console → Organization → Auth tokens
+
+# Dynatrace
+dynatrace_environment_id = "yta61562"
+dynatrace_api_token      = ""  # OTel_API_Token_v2 — needs problems.read scope
+dynatrace_operator_token = ""  # dynatrace-operator token
+
+# Datadog (Phase 7)
+# datadog_api_key = ""
+# datadog_site    = "datadoghq.com"

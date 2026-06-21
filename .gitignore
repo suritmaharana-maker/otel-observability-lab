@@ -70,3 +70,7 @@ logs/
 # Build artifacts
 dist/
 build/
+
+terraform/observability/terraform.tfvars
+terraform/observability/.terraform/
+terraform/observability/*.tfstate

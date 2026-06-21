@@ -1,0 +1,9 @@
+---
+# Ansible Galaxy collections required by this playbook
+# Install with: ansible-galaxy collection install -r ansible/requirements.yml
+
+collections:
+  - name: amazon.aws
+    version: ">=8.0.0"
+  - name: kubernetes.core
+    version: ">=3.0.0"
