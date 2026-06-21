@@ -2,16 +2,23 @@
 # OTel Observability Lab — Observability Module
 # Manages: OTel Collector, Beyla, Dynatrace OneAgent, secrets, namespaces
 #
-# Why Terraform (not kubectl/Helm manually):
-#   - Reproducible: one `terraform apply` rebuilds after trial expiry
-#   - Auditable: all config changes tracked in git + state
-#   - Multi-backend: `backends` variable controls which targets are active
-#   - Dependency-safe: Terraform enforces correct creation order
+# VERSION COMPATIBILITY (verified June 20, 2026):
+#   terraform:               >= 1.15.6
+#   hashicorp/kubernetes:    ~> 2.36.0
+#   hashicorp/helm:          ~> 2.17.0
+#   dynatrace-oss/dynatrace: ~> 1.97.0 (latest: 1.97.2, published June 10 2026)
 #
-# Why NOT Terraform for some things:
-#   - IMDSv2 hop limit: operational task, not a resource → Ansible
-#   - Node selectors after ASG replacement: ephemeral → startup script
-#   - Secrets VALUES: never in Terraform state → passed as sensitive variables
+# TOKEN SCOPES REQUIRED (verified from Terraform Registry docs):
+#   dynatrace_service_anomalies_v2: settings.read + settings.write
+#   dynatrace OneAgent ingest:      metrics.ingest + logs.ingest +
+#                                   openTelemetryTrace.ingest + DataExport
+#   problems.read:                  for /diagnose?backend=dynatrace in llm-svc
+#
+# WHY Terraform vs Ansible:
+#   Terraform  = RESOURCES (namespaces, secrets, DaemonSets, Helm releases,
+#                           Dynatrace anomaly thresholds) — stateful, tracked
+#   Ansible    = OPERATIONS (IMDSv2 hop limit fix) — runs against live instances,
+#                not a resource, changes every ASG replacement
 # =============================================================================
 
 terraform {
@@ -27,14 +34,17 @@ terraform {
       version = "~> 2.17.0"
     }
     dynatrace = {
+      # Official Dynatrace provider — supported by Dynatrace Inc.
+      # Registry: registry.terraform.io/providers/dynatrace-oss/dynatrace
+      # Latest: 1.97.2 (June 10, 2026)
       source  = "dynatrace-oss/dynatrace"
-      version = "~> 1.73.0"
+      version = "~> 1.97.0"
     }
   }
 }
 
 # =============================================================================
-# PROVIDERS — inherit cluster connection from parent module
+# PROVIDERS
 # =============================================================================
 
 provider "kubernetes" {
@@ -59,24 +69,23 @@ provider "helm" {
   }
 }
 
-# Dynatrace provider — only initialized when dynatrace backend is enabled
-# Why: avoids 401 errors when running without DT credentials
+# Dynatrace provider
+# Verified auth variable names from docs: dt_env_url and dt_api_token
+# Token must have: settings.read + settings.write (for anomaly detection)
 provider "dynatrace" {
   dt_env_url   = "https://${var.dynatrace_environment_id}.live.dynatrace.com"
-  dt_api_token = var.dynatrace_api_token
+  dt_api_token = var.dynatrace_settings_token
 }
 
 # =============================================================================
-# LOCALS — compute derived values once
+# LOCALS
 # =============================================================================
 
 locals {
-  # Which backends are active — controls conditional resource creation
   dash0_enabled     = contains(var.backends, "dash0")
   dynatrace_enabled = contains(var.backends, "dynatrace")
   datadog_enabled   = contains(var.backends, "datadog")
 
-  # OTel Collector config rendered from template
   otelcol_config = templatefile("${path.module}/templates/otelcol-config.yaml.tpl", {
     dash0_enabled            = local.dash0_enabled
     dynatrace_enabled        = local.dynatrace_enabled
@@ -91,10 +100,9 @@ locals {
 }
 
 # =============================================================================
-# NAMESPACE LABELS — label existing namespaces (created by eks module)
+# NAMESPACE LABELS
 # =============================================================================
 
-# Label otel-lab for OneAgent injection
 resource "kubernetes_labels" "otel_lab_dynatrace" {
   count       = local.dynatrace_enabled ? 1 : 0
   api_version = "v1"
@@ -108,73 +116,55 @@ resource "kubernetes_labels" "otel_lab_dynatrace" {
 }
 
 # =============================================================================
-# SECRETS — sensitive values passed as variables, never hardcoded
-#
-# Why Terraform manages secrets:
-#   - Reproducible: no manual `kubectl create secret` after cluster rebuild
-#   - Consistent: same secret structure across all environments
-#
-# Why values are variables (not literals):
-#   - Terraform state is plain JSON — secrets in state = security risk
-#   - Values passed via TF_VAR_ env vars or tfvars files (gitignored)
+# SECRETS
+# Secret VALUES are passed as sensitive variables — never hardcoded.
+# Values provided via TF_VAR_ environment variables or terraform.tfvars (gitignored).
 # =============================================================================
 
 resource "kubernetes_secret" "dash0" {
   count = local.dash0_enabled ? 1 : 0
-
   metadata {
     name      = "dash0-secret"
     namespace = "observability"
     labels    = local.common_labels
   }
-
   data = {
     "auth-token" = var.dash0_auth_token
   }
-
   type = "Opaque"
 }
 
-# Copy dash0 secret to otel-lab namespace (required by llm-svc)
+# llm-svc reads dash0-secret from otel-lab namespace
 resource "kubernetes_secret" "dash0_otel_lab" {
   count = local.dash0_enabled ? 1 : 0
-
   metadata {
     name      = "dash0-secret"
     namespace = "otel-lab"
     labels    = local.common_labels
   }
-
   data = {
     "auth-token" = var.dash0_auth_token
   }
-
   type = "Opaque"
 }
 
 resource "kubernetes_secret" "dynatrace" {
   count = local.dynatrace_enabled ? 1 : 0
-
   metadata {
     name      = "dynatrace-secret"
     namespace = "observability"
     labels    = local.common_labels
   }
-
   data = {
-    "api-token"      = var.dynatrace_api_token
+    "api-token"      = var.dynatrace_ingest_token
     "environment-id" = var.dynatrace_environment_id
   }
-
   type = "Opaque"
 }
 
 # =============================================================================
-# OTEL COLLECTOR CONFIGMAP — rendered from template based on active backends
-#
-# Why template (not static file):
-#   - backends variable controls which exporters are included
-#   - Same template works for dash0-only, dynatrace-only, or both
+# OTEL COLLECTOR CONFIGMAP
+# Rendered from template — exporters included/excluded based on backends variable
 # =============================================================================
 
 resource "kubernetes_config_map" "otelcol" {
@@ -183,7 +173,6 @@ resource "kubernetes_config_map" "otelcol" {
     namespace = "observability"
     labels    = local.common_labels
   }
-
   data = {
     "config.yaml" = local.otelcol_config
   }
@@ -242,7 +231,6 @@ resource "kubernetes_daemon_set_v1" "otelcol" {
             }
           }
 
-          # Dash0 auth token
           dynamic "env" {
             for_each = local.dash0_enabled ? [1] : []
             content {
@@ -256,7 +244,6 @@ resource "kubernetes_daemon_set_v1" "otelcol" {
             }
           }
 
-          # Dynatrace token + environment
           dynamic "env" {
             for_each = local.dynatrace_enabled ? [1] : []
             content {
@@ -330,22 +317,15 @@ resource "kubernetes_daemon_set_v1" "otelcol" {
 }
 
 # =============================================================================
-# DYNATRACE ONEA GENT — via Helm (Operator + DynaKube CR)
+# DYNATRACE ONEA GENT — Helm release
 #
-# Why Helm (not kubectl apply):
-#   - Operator has 6 CRDs + RBAC + webhooks — Helm manages lifecycle cleanly
-#   - Helm tracks the release — `terraform destroy` cleanly removes everything
-#   - Version upgrades: change chart version, `terraform apply`
-#
-# Why Terraform wraps the Helm release (not raw helm install):
-#   - Dependency ordering: OneAgent installs AFTER secrets exist
-#   - State tracking: Terraform knows if operator is installed
-#   - Consistent with rest of stack
+# Verified: DynaKube v1beta6 is correct API version (checked against our cluster)
+# Helm chart: dynatrace-operator (stable repo)
+# Requires: operator token with 'operator' + 'InstallerDownload' scopes
 # =============================================================================
 
 resource "kubernetes_namespace" "dynatrace" {
   count = local.dynatrace_enabled ? 1 : 0
-
   metadata {
     name   = "dynatrace"
     labels = local.common_labels
@@ -353,43 +333,34 @@ resource "kubernetes_namespace" "dynatrace" {
 }
 
 resource "helm_release" "dynatrace_operator" {
-  count = local.dynatrace_enabled ? 1 : 0
-
+  count      = local.dynatrace_enabled ? 1 : 0
   name       = "dynatrace-operator"
   repository = "https://raw.githubusercontent.com/Dynatrace/dynatrace-operator/main/config/helm/repos/stable"
   chart      = "dynatrace-operator"
   namespace  = kubernetes_namespace.dynatrace[0].metadata[0].name
-
-  atomic  = false
-  timeout = 300
-
+  timeout    = 300
   depends_on = [kubernetes_namespace.dynatrace]
 }
 
-# DynaKube secret for OneAgent
 resource "kubernetes_secret" "dynakube" {
   count = local.dynatrace_enabled ? 1 : 0
-
   metadata {
     name      = "dynakube"
     namespace = kubernetes_namespace.dynatrace[0].metadata[0].name
     labels    = local.common_labels
   }
-
   data = {
-    apiToken       = var.dynatrace_operator_token
-    dataIngestToken = var.dynatrace_api_token
+    apiToken        = var.dynatrace_operator_token
+    dataIngestToken = var.dynatrace_ingest_token
   }
-
-  type = "Opaque"
-
+  type       = "Opaque"
   depends_on = [helm_release.dynatrace_operator]
 }
 
-# DynaKube CR — Cloud Native Full Stack, NetTracer OFF by default
+# DynaKube CR — Cloud Native Full Stack
+# Verified: v1beta6 is correct (checked kubectl get crd dynakubes.dynatrace.com)
 resource "kubernetes_manifest" "dynakube" {
   count = local.dynatrace_enabled ? 1 : 0
-
   manifest = {
     apiVersion = "dynatrace.com/v1beta6"
     kind       = "DynaKube"
@@ -402,15 +373,11 @@ resource "kubernetes_manifest" "dynakube" {
     }
     spec = {
       apiUrl = "https://${var.dynatrace_environment_id}.live.dynatrace.com/api"
-      metadataEnrichment = {
-        enabled = true
-      }
+      metadataEnrichment = { enabled = true }
       oneAgent = {
         cloudNativeFullStack = {
           namespaceSelector = {
-            matchLabels = {
-              "dynatrace-monitor" = "true"
-            }
+            matchLabels = { "dynatrace-monitor" = "true" }
           }
         }
       }
@@ -419,72 +386,27 @@ resource "kubernetes_manifest" "dynakube" {
       }
     }
   }
-
-  depends_on = [
-    kubernetes_secret.dynakube,
-    helm_release.dynatrace_operator,
-  ]
+  depends_on = [kubernetes_secret.dynakube, helm_release.dynatrace_operator]
 }
 
 # =============================================================================
-# DYNATRACE ANOMALY DETECTION — Fixed thresholds for gateway service
+# DYNATRACE ANOMALY DETECTION
 #
-# Why Terraform (not manual UI):
-#   - Reproducible: recreated automatically when new DT environment created
-#   - Version controlled: threshold changes tracked in git
-#   - No more "forgot to configure thresholds" after trial expiry
+# Verified token scopes (from Terraform Registry, June 2026):
+#   dynatrace_service_anomalies_v2 requires: settings.read + settings.write
+#   These are DIFFERENT from ingest token — use dynatrace_settings_token variable
 #
-# Why Dynatrace provider (not API calls):
-#   - Type-safe: provider validates schema before applying
-#   - State tracked: `terraform destroy` removes the config
+# Scope "environment" applies to ALL services — no service entity ID lookup needed.
+# This avoids the need for a dynatrace_service data source (which does not exist).
+#
+# Fixed thresholds bypass the "20% of 7 days" baselining requirement.
 # =============================================================================
 
-# Data source to find the gateway service entity ID
-data "dynatrace_service" "gateway" {
+resource "dynatrace_service_anomalies_v2" "environment_defaults" {
   count = local.dynatrace_enabled ? 1 : 0
-  name  = "gateway"
-}
 
-resource "dynatrace_service_anomalies_v2" "gateway" {
-  count = local.dynatrace_enabled && length(data.dynatrace_service.gateway) > 0 ? 1 : 0
-  scope = data.dynatrace_service.gateway[0].id
-
-  # Failure rate — fixed threshold, no baseline needed
-  failure_rate {
-    enabled        = true
-    detection_mode = "fixed"
-    fixed_detection {
-      sensitivity = "high"
-      threshold   = 5
-      over_alerting_protection {
-        minutes_abnormal_state = 1
-        requests_per_minute    = 1
-      }
-    }
-  }
-
-  # Response time — fixed threshold
-  response_time {
-    enabled        = true
-    detection_mode = "fixed"
-    fixed_detection {
-      sensitivity = "high"
-      over_alerting_protection {
-        minutes_abnormal_state = 1
-        requests_per_minute    = 1
-      }
-      response_time_all {
-        degradation_milliseconds = 2000
-      }
-      response_time_slowest {
-        slowest_degradation_milliseconds = 4000
-      }
-    }
-  }
-}
-
-resource "dynatrace_service_anomalies_v2" "product_svc" {
-  count = local.dynatrace_enabled && length(data.dynatrace_service.gateway) > 0 ? 1 : 0
+  # "environment" scope = applies to all services
+  # No service entity ID needed — works immediately without baseline
   scope = "environment"
 
   failure_rate {

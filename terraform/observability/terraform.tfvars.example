@@ -1,23 +1,49 @@
-# Copy to terraform.tfvars (gitignored) and fill in values
-# NEVER commit terraform.tfvars — it contains secrets
+# =============================================================================
+# terraform.tfvars.example — copy to terraform.tfvars and fill in values
+# NEVER commit terraform.tfvars — it is in .gitignore
+#
+# How to provide values without a tfvars file:
+#   export TF_VAR_dash0_auth_token="dt0..."
+#   export TF_VAR_dynatrace_ingest_token="dt0c01..."
+#   export TF_VAR_dynatrace_settings_token="dt0c01..."
+#   export TF_VAR_dynatrace_operator_token="dt0c01..."
+# =============================================================================
 
-# Cluster connection — get from eks module outputs
+# Cluster connection — get from eks module:
+#   cd terraform/eks
+#   terraform output cluster_endpoint
+#   terraform output cluster_certificate_authority_data
 cluster_name           = "otel-lab"
-cluster_endpoint       = ""  # from: terraform output -raw cluster_endpoint
-cluster_ca_certificate = ""  # from: terraform output -raw cluster_certificate_authority_data
+cluster_endpoint       = ""
+cluster_ca_certificate = ""
 
-# Active backends — add/remove to control which exporters are active
-# Options: "dash0", "dynatrace", "datadog"
+# Active backends
+# "dash0"     = Dash0 only (default, Phase 1-5)
+# "dynatrace" = add Dynatrace (Phase 6)
+# "datadog"   = add Datadog (Phase 7, stub)
 backends = ["dash0", "dynatrace"]
 
 # Dash0
-dash0_auth_token = ""  # from Dash0 console → Organization → Auth tokens
+dash0_auth_token = ""  # Dash0 console → Organization → Auth tokens
 
-# Dynatrace
+# Dynatrace — THREE separate tokens (different scope families)
 dynatrace_environment_id = "yta61562"
-dynatrace_api_token      = ""  # OTel_API_Token_v2 — needs problems.read scope
-dynatrace_operator_token = ""  # dynatrace-operator token
 
-# Datadog (Phase 7)
+# Token 1: OTel ingest + Problems API read
+# Scopes: metrics.ingest, logs.ingest, openTelemetryTrace.ingest,
+#         DataExport, problems.read, entities.read
+dynatrace_ingest_token = ""  # OTel_API_Token_v2
+
+# Token 2: Terraform settings management
+# Scopes: settings.read, settings.write
+# Create new: DT UI → Access Tokens → Generate → name: "terraform-settings"
+dynatrace_settings_token = ""  # terraform-settings
+
+# Token 3: OneAgent operator
+# Scopes: operator (Kubernetes Operator), InstallerDownload
+# Already exists as: dynatrace-operator
+dynatrace_operator_token = ""  # dynatrace-operator
+
+# Datadog (Phase 7 — leave empty for now)
 # datadog_api_key = ""
 # datadog_site    = "datadoghq.com"
