@@ -1,0 +1,64 @@
+# =============================================================================
+# OBI — OpenTelemetry eBPF Instrumentation v0.9.0
+# preset: application — AppO11y (HTTP traces + RED metrics)
+# Network metrics enabled via config.data.network.enable
+# No hostPort — avoids port 9090 conflicts
+# =============================================================================
+
+# application preset — avoids node affinity issues with network preset
+preset: "application"
+
+privileged: true
+
+securityContext:
+  privileged: true
+
+tolerations:
+  - effect: NoSchedule
+    operator: Exists
+  - effect: NoExecute
+    operator: Exists
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+config:
+  create: true
+  data:
+    otel_traces_export:
+      endpoint: "http://otelcol.observability.svc.cluster.local:4317"
+      protocol: grpc
+
+    otel_metrics_export:
+      endpoint: "http://otelcol.observability.svc.cluster.local:4317"
+      protocol: grpc
+
+    attributes:
+      kubernetes:
+        enable: true
+
+    network:
+      enable: true
+
+    filter:
+      network:
+        k8s_dst_owner_name:
+          not_match: '{kube*,*jaeger-agent*,*prometheus*,*promtail*,*grafana-agent*}'
+        k8s_src_owner_name:
+          not_match: '{kube*,*jaeger-agent*,*prometheus*,*promtail*,*grafana-agent*}'
+
+    # Disable prometheus export to avoid port 9090 conflict
+    # Metrics go via OTLP instead
+    prometheus_export:
+      port: 9091
+      path: /metrics
+
+env:
+  OTEL_EBPF_KUBE_METADATA_ENABLE: "true"
+
+dnsPolicy: ClusterFirstWithHostNet
