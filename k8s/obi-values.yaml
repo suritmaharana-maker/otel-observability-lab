@@ -1,17 +1,9 @@
-# =============================================================================
-# OBI — OpenTelemetry eBPF Instrumentation v0.9.0
-# preset: application — AppO11y (HTTP traces + RED metrics)
-# Network metrics enabled via config.data.network.enable
-# No hostPort — avoids port 9090 conflicts
-# =============================================================================
-
-# application preset — avoids node affinity issues with network preset
 preset: "application"
-
 privileged: true
-
 securityContext:
   privileged: true
+extraCapabilities:
+  - SYS_RESOURCE
 
 tolerations:
   - effect: NoSchedule
@@ -27,14 +19,37 @@ resources:
     cpu: 100m
     memory: 128Mi
 
+# Mount debugfs/tracefs from host — required for StatsO11y tracepoints
+volumes:
+  - name: debugfs
+    hostPath:
+      path: /sys/kernel/debug
+      type: DirectoryOrCreate
+  - name: tracefs
+    hostPath:
+      path: /sys/kernel/tracing
+      type: DirectoryOrCreate
+
+volumeMounts:
+  - name: debugfs
+    mountPath: /sys/kernel/debug
+  - name: tracefs
+    mountPath: /sys/kernel/tracing
+
 config:
   create: true
   data:
-    otel_traces_export:
+    meter_provider:
+      features:
+        - network
+        - stats
+        - application
+
+    otel_metrics_export:
       endpoint: "http://otelcol.observability.svc.cluster.local:4317"
       protocol: grpc
 
-    otel_metrics_export:
+    otel_traces_export:
       endpoint: "http://otelcol.observability.svc.cluster.local:4317"
       protocol: grpc
 
@@ -44,6 +59,17 @@ config:
 
     network:
       enable: true
+      source: socket_filter
+      allowed_attributes:
+        - k8s.src.owner.name
+        - k8s.dst.owner.name
+        - k8s.src.namespace
+        - k8s.dst.namespace
+
+    discovery:
+      instrument:
+        - k8s_namespace: otel-lab
+        - k8s_namespace: observability
 
     filter:
       network:
@@ -52,13 +78,13 @@ config:
         k8s_src_owner_name:
           not_match: '{kube*,*jaeger-agent*,*prometheus*,*promtail*,*grafana-agent*}'
 
-    # Disable prometheus export to avoid port 9090 conflict
-    # Metrics go via OTLP instead
     prometheus_export:
       port: 9091
       path: /metrics
 
 env:
   OTEL_EBPF_KUBE_METADATA_ENABLE: "true"
+  OTEL_EBPF_METRICS_FEATURES: "network,stats,application"
+  OTEL_EBPF_NETWORK_SOURCE: "socket_filter"
 
 dnsPolicy: ClusterFirstWithHostNet
