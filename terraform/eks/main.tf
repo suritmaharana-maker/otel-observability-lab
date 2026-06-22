@@ -231,7 +231,7 @@ resource "aws_eks_node_group" "main" {
     max_unavailable = 1
   }
 
-  # AL2023 ships Linux kernel 6.1 â€” fully compatible with Cilium 1.19.4 eBPF
+  # Ubuntu 24.04 kernel 6.8 � testing Pixie bpftrace compatibility (6.8 < 6.10 broken threshold)
   ami_type = "AL2023_x86_64_STANDARD"
 
   # Required by Cilium 1.19 docs for EKS managed node groups
@@ -306,3 +306,7 @@ resource "kubernetes_namespace" "otel_lab" {
     aws_eks_addon.kube_proxy,
   ]
 }
+
+
+
+# =============================================================================
