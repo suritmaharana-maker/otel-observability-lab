@@ -296,3 +296,134 @@ The cluster is currently STOPPED. Do not start it until we have a clear plan for
 
 ---
 
+
+---
+
+## 11. AIOPS RCA — FULL IMPLEMENTATION DETAILS
+
+### Architecture
+`llm-svc` is a Python FastAPI service deployed in `otel-lab` namespace.
+It exposes a `/diagnose` endpoint that:
+1. Queries Prometheus metrics from the active backend (Dash0 or Dynatrace)
+2. Passes signals to AWS Bedrock (Claude claude-sonnet-4-6) for root cause analysis
+3. Returns structured JSON with diagnosis
+
+### Endpoint
+```
+GET http://<ELB>/diagnose?window=5m&backend=dash0
+GET http://<ELB>/diagnose?window=30m&backend=dynatrace
+```
+
+### OTel (Dash0) Backend — How It Works
+llm-svc queries Dash0 Prometheus API with these signals:
+
+```python
+# Hubble policy drops
+hubble_drop_total = query_prometheus(
+    f'increase(hubble_drop_total{{reason="POLICY_DENY"}}[{window}])'
+)
+
+# HTTP error rate
+http_error_rate = query_prometheus(
+    f'rate(http_server_request_duration_seconds_count{{http_response_status_code=~"5.."}}[{window}])'
+)
+
+# Network flow bytes
+network_flow = query_prometheus(
+    f'increase(beyla_network_flow_bytes_total[{window}])'
+)
+```
+
+**Proven results (Phase 5):**
+```
+GET /diagnose?window=5m&backend=dash0
+→ ROOT CAUSE:  "Cilium network policy blocking traffic between microservices"
+→ CONFIDENCE:  HIGH
+→ SEVERITY:    CRITICAL
+→ drops:       207.63
+```
+
+### Dynatrace Backend — How It Works
+llm-svc queries Dynatrace Problems API directly via urllib:
+
+```python
+import urllib.request, json, os
+
+token = os.environ.get('DT_API_TOKEN', '')
+env = os.environ.get('DT_ENVIRONMENT_ID', 'yta61562')
+url = f'https://{env}.live.dynatrace.com/api/v2/problems?from=now-{window}'
+req = urllib.request.Request(url, headers={'Authorization': f'Api-Token {token}'})
+r = urllib.request.urlopen(req, timeout=10)
+data = json.loads(r.read().decode())
+problems = data.get('problems', [])
+```
+
+**CRITICAL NOTE — httpx vs urllib bug:**
+The llm-svc code has a bug where the async httpx call does NOT return Davis problems
+even when the token is correct. The urllib call works perfectly.
+Direct API verification always works:
+```powershell
+$headers = @{ Authorization = "Api-Token $DT_TOKEN" }
+Invoke-WebRequest -Uri "https://yta61562.live.dynatrace.com/api/v2/problems?from=now-30m" -Headers $headers
+```
+
+### Davis AI — Proven Firing Behavior (Phase 6)
+```
+FAULT injected:          00:20:05 (CiliumNetworkPolicy)
+Failure rate increase:   Fired 00:21:00 (55 seconds after fault)
+Response time degradation: Fired 00:22:00 (115 seconds after fault)
+Both problems CLOSED:    00:28:09 (when fault removed)
+```
+
+**Davis problem IDs (confirmed):** P-260611, P-260612
+
+**Token requirements for DT backend:**
+- `problems.read` — required to read Davis problems
+- `metrics.ingest`, `logs.ingest`, `openTelemetryTrace.ingest` — for OTel Collector
+- Token name in DT UI: `OTel_API_Token_v2`
+- Token stored in: `dynatrace-secret` in `observability` namespace AND as env var in `llm-svc`
+
+### Setting DT Token in llm-svc
+```powershell
+$encoded = kubectl get secret dynatrace-secret -n observability -o jsonpath='{.data.api-token}'
+$DT_TOKEN = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($encoded))
+kubectl set env deployment/llm-svc -n otel-lab "DT_API_TOKEN=$DT_TOKEN" "DT_ENVIRONMENT_ID=yta61562"
+kubectl rollout restart deployment/llm-svc -n otel-lab
+```
+
+### Verified End-to-End Test Results (Phase 6, June 21 2026)
+```
+=== DASH0 ===
+ROOT CAUSE:  "Cilium network policy blocking traffic between microservices"
+CONFIDENCE:  HIGH
+SEVERITY:    CRITICAL
+drops:       207.63
+
+=== DYNATRACE (direct API) ===
+Total problems: 3
+- Failure rate increase    CLOSED  (started 00:21:00)
+- Response time degradation CLOSED (started 00:22:00)
+- Monitoring not available  OPEN
+
+=== DYNATRACE (/diagnose endpoint) ===
+ROOT CAUSE:  "Kubernetes Cilium network policies blocking traffic between services"
+CONFIDENCE:  HIGH
+NOTE: Davis problems not surfaced due to httpx bug — fix pending
+```
+
+### Known Bug — /diagnose?backend=dynatrace
+The llm-svc `/diagnose?backend=dynatrace` returns ROOT CAUSE correctly (Bedrock LLM inference)
+but `davis_active_problems` is empty due to async httpx not returning DT API response.
+Workaround: query DT Problems API directly via PowerShell (shown above).
+Fix: replace httpx with urllib in llm-svc collect_dynatrace_signals function.
+
+### llm-svc Container
+```
+ECR image: 982920153340.dkr.ecr.us-east-2.amazonaws.com/otel-lab/llm-svc:latest
+Namespace: otel-lab
+Port: 8001 (internal), accessed via gateway at /diagnose
+AWS Bedrock model: us.anthropic.claude-3-5-sonnet-20241022-v2:0
+Region: us-east-2
+Required IAM: AmazonBedrockFullAccess (on node role otel-lab-node-group-role)
+```
+
