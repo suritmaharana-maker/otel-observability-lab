@@ -91,7 +91,7 @@ def resolve_window(window: str, start: str | None, end: str | None) -> dict:
         return {
             "range": f"{span_s}s",
             "anchor_epoch": t_end.timestamp(),
-            "label": f"{start} → {end} ({span_s}s)",
+            "label": f"{start} -> {end} ({span_s}s)",
         }
     # relative fallback — unchanged Phase 6 behaviour
     return {"range": window, "anchor_epoch": None, "label": f"last {window}"}
@@ -367,6 +367,45 @@ Based on these signals, provide a root cause analysis in this exact JSON format:
 Return ONLY the JSON object, no other text."""
 
 
+def healthy_path_check(signals: dict, backend: str) -> dict | None:
+    """Deterministic 'no anomaly' gate (Phase 7).
+
+    For the dash0 backend, the two unambiguous fault fingerprints are POLICY_DENY
+    drops and OBI TCP failed connections. If BOTH are zero, nothing is being blocked
+    and there is no fault to diagnose — so we short-circuit and return a 'healthy'
+    result WITHOUT calling Bedrock. This prevents the LLM from pattern-matching a
+    confident fault out of all-zero data, and saves the inference round-trip.
+
+    Returns a diagnosis dict if the window is healthy, else None (caller proceeds
+    to the LLM). Only gates the dash0 backend; dynatrace relies on Davis problems.
+    """
+    if backend != "dash0":
+        return None
+
+    drops = signals.get("hubble_drop_total_policy_deny", 0) or 0
+    tcp_failed = signals.get("obi_tcp_failed_connections", 0) or 0
+
+    if drops == 0 and tcp_failed == 0:
+        return {
+            "root_cause": "No anomaly detected — network policy enforcement and TCP connections are nominal.",
+            "confidence": "high",
+            "evidence": [
+                f"hubble_drop_total (POLICY_DENY): {drops} — no packets being denied",
+                f"OBI TCP failed connections: {tcp_failed} — no failing handshakes",
+                f"product-svc spans emitted: {signals.get('product_svc_spans', 0)}",
+            ],
+            "recommendation": "No action required. System is operating normally for this window.",
+            "severity": "none",
+            "explanation": (
+                "Both primary fault fingerprints (Cilium POLICY_DENY drops and OBI TCP "
+                "failed connections) are zero for this window, indicating traffic is "
+                "flowing without policy blocks. No root-cause analysis is warranted."
+            ),
+            "backend_used": backend,
+        }
+    return None
+
+
 def call_bedrock(prompt: str) -> dict:
     t0 = time.time()
     resp = bedrock.converse(
@@ -410,7 +449,7 @@ async def health():
     return {
         "status": "ok",
         "service": "llm-svc",
-        "version": "0.6.0",
+        "version": "0.7.0",
         "backends": ["dash0", "dynatrace"],
         "dash0_configured": bool(DASH0_AUTH_TOKEN),
         "dynatrace_configured": bool(DT_API_TOKEN),
@@ -513,6 +552,39 @@ async def diagnose(
             signals = await collect_dash0_signals(win, service)
         else:
             raise HTTPException(status_code=400, detail=f"Unknown backend: {backend}. Use dash0 or dynatrace")
+
+        # Deterministic healthy-path gate: if no fault fingerprints are present,
+        # return a 'no anomaly' result without spending an LLM call (Phase 7).
+        healthy = healthy_path_check(signals, backend)
+        if healthy is not None:
+            total_ms = round((time.time() - t0) * 1000, 1)
+            span.set_attribute("diagnose.root_cause", healthy["root_cause"])
+            span.set_attribute("diagnose.confidence", healthy["confidence"])
+            span.set_attribute("diagnose.severity", healthy["severity"])
+            span.set_attribute("diagnose.total_ms", total_ms)
+            span.set_attribute("diagnose.healthy_path", True)
+            if backend == "dash0":
+                span.set_attribute("diagnose.hubble_drop_total_policy_deny", signals.get("hubble_drop_total_policy_deny", 0))
+                span.set_attribute("diagnose.obi_tcp_failed_connections", signals.get("obi_tcp_failed_connections", 0))
+                span.set_attribute("diagnose.product_svc_spans", signals.get("product_svc_spans", 0))
+            log.info(
+                f"diagnose_complete backend={backend} window={win['label']} "
+                f"root_cause={healthy['root_cause']} healthy_path=true total_ms={total_ms}"
+            )
+            return {
+                "backend": backend,
+                "window": win["label"],
+                "window_range": win["range"],
+                "window_absolute": win["anchor_epoch"] is not None,
+                "service": service,
+                "signals": signals,
+                "diagnosis": healthy,
+                "model": "none (deterministic healthy-path)",
+                "llm_latency_ms": 0.0,
+                "total_ms": total_ms,
+                "tokens": {"input": 0, "output": 0},
+                "cost_usd": 0.0,
+            }
 
         # Build prompt and call Bedrock
         prompt = build_prompt(signals, service, backend)
