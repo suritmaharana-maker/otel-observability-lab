@@ -1,7 +1,7 @@
 # Observability Lab — Verified Version Reference
 
 **Project:** Surit Maharana Observability Lab  
-**Last verified:** June 14, 2026  
+**Last verified:** June 22, 2026  
 **Sources:** PyPI, npmjs.com, github.com releases, python.org, nodejs.org, endoflife.date, AWS docs, Helm GitHub
 
 ---
@@ -54,6 +54,7 @@
 |---|---|---|
 | `traceloop-sdk` (Python) | **0.61.0** | PyPI (May 31 2026) |
 | `@traceloop/node-server-sdk` (Node) | **0.60.0** | GitHub (Apr 19 2026) |
+| **AWS Bedrock model (AIOps RCA)** | **Amazon Nova Micro** `us.amazon.nova-micro-v1:0` | AWS Bedrock, us-east-2 |
 
 > **Compatibility joint:** OpenLLMetry wraps the OTel `TracerProvider` you configure — it does not create a second pipeline. LLM spans carry the same `trace_id` as the HTTP span that triggered them. Requires `opentelemetry-sdk >= 1.40.0`.
 
@@ -66,10 +67,15 @@
 | **Cilium CNI** | **1.19.4** | github.com/cilium/cilium (May 13 2026) | Active stable; 1.18.10 and 1.17.16 also maintained |
 | **Hubble** | bundled with Cilium 1.19.4 | — | OTLP export native since Cilium 1.15 |
 | **Grafana Beyla** | **3.20.0** | github.com/grafana/beyla (Jun 8 2026) | Helm chart 1.16.8; stable release |
+| **OTel eBPF Instrumentation (OBI)** | **0.9.2** | open-telemetry/opentelemetry-ebpf-instrumentation | NetO11y + StatsO11y; installed separately from Beyla |
 
 > **Cilium kernel requirement:** Linux kernel 5.10+ required; 5.15+ recommended for full eBPF feature set. EKS AL2023 AMIs ship kernel 6.12.90 (AL2023.12.20260608) — TCX mode fully supported. No bpf-filter-priority workaround needed.
 
-> **Beyla note:** Grafana donated Beyla to OpenTelemetry under the name "OpenTelemetry eBPF Instrumentation (OBI)." The current stable release is 3.20.0 (Helm chart 1.16.8, Jun 8 2026). Emit is OTLP-native. Requires privileged: true + SYS_ADMIN capability on EKS.
+> **Beyla note:** Grafana donated Beyla to OpenTelemetry under the name "OpenTelemetry eBPF Instrumentation (OBI)." The current stable Beyla release is 3.20.0 (Helm chart 1.16.8, Jun 8 2026). Emit is OTLP-native. Requires privileged: true + SYS_ADMIN capability on EKS.
+
+> **OBI note:** OBI is deployed as a separate DaemonSet (Helm chart version 0.9.2) with `meter_provider.features: [network, stats, application]` and `OTEL_EBPF_NETWORK_SOURCE: socket_filter` (required — Cilium uses TC direct action). It surfaces `obi.network.flow.bytes`, `obi.stat.tcp.failed.connections`, and `obi.stat.tcp.rtt`. The RTT metric exports but renders as a sawtooth artifact in Dash0 (rate()+reset); rendering fix is backlogged.
+
+> **TCP retransmit — verified finding:** A claim that Beyla 3.20.0 exposes TCP retransmit counts as a queryable metric did not hold up against the live endpoint. Beyla exposes only `beyla_network_flow_bytes`; the `tcp_retransmit_skb` tracepoint is internal to L7 span correlation and is not user-facing. TCP retransmit visibility requires a custom eBPF program. The proven fault demo uses POLICY_DENY drops, OBI flow bytes, and OBI TCP failed connections instead.
 
 > **Cloud-specific eBPF:**
 > - **EKS:** Replace AWS VPC CNI with Cilium (Terraform `cilium_replace_cni = true`)
@@ -233,3 +239,7 @@ Add `renovate.json` to the repo root to auto-track version bumps:
 | Jun 14, 2026 | Grafana Beyla | 3.12.x | 3.20.0 (chart 1.16.8) | Live cluster confirmed via helm list -A |
 | Jun 14, 2026 | EKS AL2023 kernel | 6.1 | 6.12.90-120.164.amzn2023.x86_64 | Live cluster confirmed via kubectl get nodes |
 | Jun 14, 2026 | opentelemetry-instrumentation-psycopg2 | 0.63b0 | 0.63b1 | Must match fastapi==0.63b1 — confirmed in cluster |
+| Jun 22, 2026 | OBI | (not listed) | 0.9.2 | Added as distinct component — NetO11y + StatsO11y, separate from Beyla |
+| Jun 22, 2026 | Beyla TCP retransmit metric | assumed exposed | not user-facing | Verified against live endpoint; `tcp_retransmit_skb` is internal only |
+| Jun 22, 2026 | llm-svc | 0.6.0 | 0.7.0 | Absolute time window + 3 new signals + deterministic healthy-path gate |
+| Jun 22, 2026 | AIOps model | (not recorded) | Amazon Nova Micro | Confirmed via /diagnose response model field |

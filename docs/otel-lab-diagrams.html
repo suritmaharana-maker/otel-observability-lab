@@ -93,8 +93,8 @@
 
 <!-- ═══════════════════════════════════════════════════════ TAB 1: ARCHITECTURE -->
 <div id="arch" class="tab active">
-  <h1>System Architecture — Phases 1–5</h1>
-  <p>Three-service application on AWS EKS. Cross-node placement enables Hubble flow visibility. llm-svc adds Bedrock + Dash0 AIOps layer.</p>
+  <h1>System Architecture — Phases 1–7.5</h1>
+  <p>Three-service application on AWS EKS. Cross-node placement enables Hubble flow visibility. llm-svc adds Bedrock + Dash0 AIOps layer with absolute-window querying and a deterministic healthy-path gate.</p>
 
   <h2>Internet ingress</h2>
   <div class="grid g2">
@@ -139,7 +139,7 @@
     <div class="node c-green">
       <div class="label">App · :8002 · ECR · Phase 4+5</div>
       <div class="name">llm-svc</div>
-      <div class="detail">10.0.2.155 · Bedrock Converse API<br>/recommendations  /diagnose (AIOps)</div>
+      <div class="detail">10.0.2.155 · Bedrock Nova Micro · /recommendations<br>/diagnose (AIOps · absolute window · healthy gate)</div>
     </div>
     <div class="node c-amber">
       <div class="label">Telemetry · DaemonSet</div>
@@ -149,7 +149,7 @@
   </div>
 
   <h2>eBPF layer — all nodes</h2>
-  <div class="grid g2">
+  <div class="grid g3">
     <div class="node c-blue">
       <div class="label">CNI · eBPF</div>
       <div class="name">Cilium 1.19.4 + Hubble</div>
@@ -159,6 +159,11 @@
       <div class="label">Auto-instrument · DaemonSet</div>
       <div class="name">Beyla 3.20.0</div>
       <div class="detail">L7 RED spans · beyla_network_flow_bytes · socket_filter (Cilium-compatible)</div>
+    </div>
+    <div class="node c-teal">
+      <div class="label">OBI · DaemonSet · Phase 7</div>
+      <div class="name">OTel eBPF Instrumentation 0.9.2</div>
+      <div class="detail">NetO11y + StatsO11y · obi.network.flow.bytes · obi.stat.tcp.failed.connections · obi.stat.tcp.rtt</div>
     </div>
   </div>
 
@@ -179,8 +184,8 @@
 
 <!-- ═══════════════════════════════════════════════════════ TAB 2: DATA FLOW -->
 <div id="flow" class="tab">
-  <h1>Instrumentation & Data Flow — Phases 1–5</h1>
-  <p>Six signal sources → one OTel Collector pipeline → Dash0. Phase 5 adds a feedback loop: Dash0 Prometheus API → llm-svc → Bedrock RCA.</p>
+  <h1>Instrumentation & Data Flow — Phases 1–7.5</h1>
+  <p>Multiple eBPF + SDK signal sources → one OTel Collector pipeline → Dash0. The AIOps loop closes it: Dash0 Prometheus API → llm-svc → Bedrock RCA, now over an exact incident window with a deterministic healthy-path gate.</p>
 
   <h2>Phase 4 trace waterfall — GET /recommendations (936ms)</h2>
   <div class="waterfall">
@@ -222,12 +227,12 @@
     </div>
   </div>
 
-  <h2>Phase 5 AIOps loop — GET /diagnose (2,261ms during fault)</h2>
+  <h2>AIOps loop — GET /diagnose (~3,440ms during fault)</h2>
   <div class="waterfall">
     <div class="wf-row">
       <div class="wf-name">GET /diagnose?window=2m</div>
       <div class="wf-svc" style="color:var(--teal)">gateway</div>
-      <div class="wf-dur">2,261ms</div>
+      <div class="wf-dur">3,440ms</div>
       <div class="wf-bar" style="width:100%;background:var(--red)"></div>
     </div>
     <div class="wf-row">
@@ -262,14 +267,14 @@
     </div>
   </div>
 
-  <h2>Phase 5 signals during CiliumNetworkPolicy fault</h2>
+  <h2>Signals during CiliumNetworkPolicy fault — exact window (365s, absolute)</h2>
   <div class="box">
-    <div class="box-title">Real signals queried from Dash0 Prometheus API</div>
-    <div class="signal-row"><span>hubble_policy_deny_drops</span><span class="signal-val">184.0 drops</span></div>
-    <div class="signal-row"><span>http_5xx_count</span><span class="signal-val">8.73 errors</span></div>
-    <div class="signal-row"><span>http_total_count</span><span>36.34 requests</span></div>
-    <div class="signal-row"><span>http_error_rate_pct</span><span class="signal-val">24.0%</span></div>
-    <div class="signal-row"><span>network_flow_bytes</span><span>172,089 bytes</span></div>
+    <div class="box-title">Real signals queried from Dash0 Prometheus API · Fault-2 window 21:56:52Z–22:02:57Z</div>
+    <div class="signal-row"><span>hubble_drop_total · POLICY_DENY</span><span class="signal-val">464.55 drops</span></div>
+    <div class="signal-row"><span>obi.network.flow.bytes (gw→product-svc)</span><span class="signal-val">16,921 bytes (drop)</span></div>
+    <div class="signal-row"><span>obi.stat.tcp.failed.connections</span><span class="signal-val">46.23 failed</span></div>
+    <div class="signal-row"><span>dash0.spans (product-svc)</span><span class="signal-val">0.0 — app layer silent</span></div>
+    <div class="signal-row"><span>RCA · Bedrock Nova Micro</span><span>high confidence · critical · $0.00005</span></div>
   </div>
 
   <h2>gen_ai.* span attributes — bedrock.converse</h2>
@@ -324,7 +329,7 @@
     <div class="node c-blue">
       <div class="label">Layer 2 — Network</div>
       <div class="name">Cilium Hubble + Beyla</div>
-      <div class="detail">Flow bytes · POLICY_DENY drops · L7 spans<br>Sees cause: 184 TCP drops on port 8001</div>
+      <div class="detail">Flow bytes · POLICY_DENY drops · L7 spans<br>Sees cause: 464 TCP drops on port 8001</div>
     </div>
     <div class="node c-green">
       <div class="label">Layer 3 — AIOps (Phase 5)</div>
@@ -342,7 +347,7 @@
     </div>
     <div class="node c-green">
       <div class="label">eBPF sees (root cause)</div>
-      <div class="name">184 TCP POLICY_DENY drops · port 8001</div>
+      <div class="name">464 TCP POLICY_DENY drops · port 8001</div>
       <div class="detail">gateway → product-svc blocked<br>hubble_drop_total spike visible in Dash0</div>
     </div>
   </div>
@@ -355,15 +360,15 @@
       2. <strong style="color:var(--white)">Signals flow</strong> — hubble_drop_total spikes in Dash0, OTel SDK records 502 errors<br>
       3. <strong style="color:var(--white)">GET /diagnose</strong> — llm-svc queries Dash0 Prometheus API for 4 signals<br>
       4. <strong style="color:var(--white)">Bedrock called</strong> — signals + SRE context prompt → Nova Micro<br>
-      5. <strong style="color:var(--white)">RCA returned in 2.2s</strong> — root cause, confidence, evidence, kubectl command<br>
+      5. <strong style="color:var(--white)">RCA returned in ~3s</strong> — root cause, confidence, evidence, kubectl command (and on a healthy window, a deterministic "no anomaly" with no LLM call)<br>
       6. <strong style="color:var(--white)">Bridge call avoided</strong> — what used to take 45 minutes now takes 2 seconds
     </div>
   </div>
 
   <h2>Beyla TCP retransmit — verified finding</h2>
   <div class="box">
-    <div class="box-title">Gemini hallucinated — verified June 17, 2026 against Grafana docs</div>
-    <p style="margin:0;font-size:12px">Beyla 3.20.0 exposes only <code>beyla_network_flow_bytes</code> at its Prometheus endpoint. The <code>tcp_retransmit_skb</code> tracepoint is used internally for L7 span correlation but is NOT a user-facing metric. TCP retransmit visibility requires a custom eBPF program — a Phase 6 contribution opportunity.</p>
+    <div class="box-title">Verified against the live Beyla endpoint, June 2026</div>
+    <p style="margin:0;font-size:12px">A claim that Beyla 3.20.0 exposes TCP retransmit counts as a queryable metric did not hold up. Beyla exposes only <code>beyla_network_flow_bytes</code> at its Prometheus endpoint. The <code>tcp_retransmit_skb</code> tracepoint is used internally for L7 span correlation but is NOT a user-facing metric. TCP retransmit visibility requires a custom eBPF program — an open contribution opportunity. The proven fault demo uses POLICY_DENY drops, OBI flow bytes, and OBI TCP failed connections instead.</p>
   </div>
 
   <h2>What is still unbuilt (Phases 6–7)</h2>
@@ -383,23 +388,23 @@
 
 <!-- ═══════════════════════════════════════════════════════ TAB 4: EXECUTIVE SUMMARY -->
 <div id="exec" class="tab">
-  <h1>Executive Summary — Phases 1–5 Complete</h1>
-  <p>Open reference architecture bridging on-prem network observability and cloud-native eBPF through a single OTel pipeline, with LLM-powered root cause analysis. 5 of 8 phases complete.</p>
+  <h1>Executive Summary — Phases 1–7.5 Complete</h1>
+  <p>Open reference architecture bridging network observability and cloud-native eBPF through a single OTel pipeline, with LLM-powered root cause analysis over an exact incident window. 7.5 of 8 phases complete.</p>
 
   <div class="stats">
-    <div class="stat"><div class="val">5</div><div class="lbl">Phases complete</div></div>
-    <div class="stat"><div class="val">913</div><div class="lbl">Spans in Dash0</div></div>
-    <div class="stat"><div class="val">2.2s</div><div class="lbl">RCA time (Phase 5)</div></div>
-    <div class="stat"><div class="val">184</div><div class="lbl">Policy drops detected</div></div>
-    <div class="stat"><div class="val">24%</div><div class="lbl">Error rate during fault</div></div>
+    <div class="stat"><div class="val">7.5</div><div class="lbl">Phases complete</div></div>
+    <div class="stat"><div class="val">~3s</div><div class="lbl">RCA time</div></div>
+    <div class="stat"><div class="val">464</div><div class="lbl">Policy drops (fault window)</div></div>
+    <div class="stat"><div class="val">46</div><div class="lbl">TCP failures detected</div></div>
+    <div class="stat"><div class="val">$0.00005</div><div class="lbl">Cost per RCA</div></div>
   </div>
 
-  <h2>Phase 5 RCA result — during CiliumNetworkPolicy fault</h2>
+  <h2>AIOps RCA result — during CiliumNetworkPolicy fault (absolute window)</h2>
   <div class="box">
     <div class="box-title" style="color:var(--red)">ROOT CAUSE (high confidence · critical severity)</div>
-    <p style="margin:8px 0 4px;color:var(--white);font-size:14px">"The Cilium network policy is blocking necessary traffic between the gateway and product-svc services."</p>
-    <p style="margin:0;font-size:12px">RECOMMENDATION: <code>kubectl get ciliumnetworkpolicy -o json | jq '.items[]'</code></p>
-    <p style="margin:4px 0 0;font-size:12px;color:var(--text2)">Time to diagnosis: 2,261ms · Bedrock Nova Micro · Dash0 Prometheus API · 4 signal queries</p>
+    <p style="margin:8px 0 4px;color:var(--white);font-size:14px">"A Cilium network policy is blocking traffic between the gateway and product-svc."</p>
+    <p style="margin:0;font-size:12px">EVIDENCE: POLICY_DENY drops spiked · flow bytes dropped · TCP failed connections spiked · product-svc spans fell to zero</p>
+    <p style="margin:4px 0 0;font-size:12px;color:var(--text2)">~3,440ms · Bedrock Nova Micro · exact 365s window · healthy-path gate returns "no anomaly" with no LLM call on clean windows</p>
   </div>
 
   <h2>Phase roadmap</h2>
@@ -409,10 +414,11 @@
     <tr><td>2</td><td>Full MELT</td><td><span class="badge badge-done">✓ DONE</span></td><td>OTel SDK + Beyla + Hubble → Dash0</td></tr>
     <tr><td>3</td><td>Network Blindspot</td><td><span class="badge badge-done">✓ DONE</span></td><td>TCP POLICY_DENY smoking gun · 5,016ms trace</td></tr>
     <tr><td>4</td><td>GenAI Observability</td><td><span class="badge badge-done">✓ DONE</span></td><td>bedrock.converse span · gen_ai.* attributes · cost tracking</td></tr>
-    <tr><td>5</td><td>AIOps RCA</td><td><span class="badge badge-done">✓ DONE</span></td><td>LLM reads Dash0 signals · root cause in 2.2s</td></tr>
-    <tr><td>6</td><td>Hybrid / On-prem</td><td><span class="badge badge-next">NEXT</span></td><td>k3s + NetFlow/sFlow via OTel · unique contribution</td></tr>
-    <tr><td>7</td><td>Multi-backend</td><td><span class="badge badge-plan">PLANNED</span></td><td>Dynatrace + Datadog + Dash0 comparison</td></tr>
-    <tr><td>8</td><td>Public packaging</td><td><span class="badge badge-plan">PLANNED</span></td><td>README + one-click deploy + Substack series</td></tr>
+    <tr><td>5</td><td>AIOps RCA</td><td><span class="badge badge-done">✓ DONE</span></td><td>LLM reads Dash0 signals · root cause in ~3s</td></tr>
+    <tr><td>6</td><td>Multi-backend</td><td><span class="badge badge-done">✓ DONE</span></td><td>Dynatrace (OTLP) alongside Dash0 · same signal, two lenses</td></tr>
+    <tr><td>7</td><td>OBI — Net + Stats + App O11y</td><td><span class="badge badge-done">✓ DONE</span></td><td>obi.network.flow.bytes · tcp.failed.connections · spans correlate</td></tr>
+    <tr><td>7.5</td><td>AIOps upgrades</td><td><span class="badge badge-done">✓ DONE</span></td><td>Absolute time window · 3 new signals · deterministic healthy-path gate</td></tr>
+    <tr><td>8</td><td>On-prem bridge</td><td><span class="badge badge-next">NEXT</span></td><td>k3s + NetFlow/sFlow via OTel · unique contribution</td></tr>
   </table>
 
   <h2>Signal coverage</h2>
@@ -421,7 +427,7 @@
     <tr><td>HTTP latency</td><td class="ok">✓ spans</td><td class="ok">✓ RED</td><td class="ok">✓ bytes</td><td>—</td><td class="ok">✓ queried</td></tr>
     <tr><td>DB queries</td><td class="ok">✓ SQL spans</td><td class="ok">✓ L7</td><td class="ok">✓ bytes</td><td>—</td><td>—</td></tr>
     <tr><td>Policy drops</td><td class="no">✗</td><td class="no">✗</td><td class="ok">✓ POLICY_DENY</td><td>—</td><td class="ok">✓ queried</td></tr>
-    <tr><td>TCP retransmits</td><td class="no">✗</td><td class="no">✗ verified</td><td class="no">✗</td><td>—</td><td class="soon">Phase 6</td></tr>
+    <tr><td>TCP retransmits</td><td class="no">✗</td><td class="no">✗ verified</td><td class="no">✗</td><td>—</td><td class="soon">custom eBPF</td></tr>
     <tr><td>LLM tokens/cost</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="ok">✓ Phase 4</td><td class="ok">✓ tracked</td></tr>
     <tr><td>Root cause text</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="ok">✓ Phase 5</td></tr>
     <tr><td>NetFlow on-prem</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="soon">Phase 6</td></tr>
@@ -441,7 +447,7 @@
 
   <div style="margin-top:24px;padding:16px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;text-align:center">
     <div style="color:var(--teal);font-size:14px;font-weight:600;margin-bottom:6px">github.com/suritmaharana-maker/otel-observability-lab</div>
-    <div style="color:var(--text2);font-size:12px">June 2026 · Phases 1–5 complete · Next: Phase 6 on-prem bridge</div>
+    <div style="color:var(--text2);font-size:12px">June 2026 · Phases 1–7.5 complete · Next: Phase 8 on-prem bridge</div>
   </div>
 </div>
 
