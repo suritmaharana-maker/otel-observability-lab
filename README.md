@@ -164,9 +164,3 @@ VERSIONS.md       pinned version reference and compatibility chain
 ```
 
 > Implementation note: the gateway runs from a Kubernetes ConfigMap (`gateway-code`), and `llm-svc` deploys by image digest to force a clean pull on `:latest`. Both are documented in the runbook.
-
----
-
-## Licence
-
-Released under the MIT Licence — see the `LICENSE` file. (If you are reusing substantial portions, attribution is appreciated.)
