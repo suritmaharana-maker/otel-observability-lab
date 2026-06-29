@@ -1,0 +1,59 @@
+# Deploys the EUM frontend into the otel-lab namespace so its browser spans flow
+# through the same pipeline. Build/push the image to ECR first, then apply.
+#
+#   docker build -t <acct>.dkr.ecr.us-east-2.amazonaws.com/otel-lab-frontend:latest .
+#   docker push  <acct>.dkr.ecr.us-east-2.amazonaws.com/otel-lab-frontend:latest
+#   kubectl apply -f k8s/frontend.yaml
+#
+# Runtime config (gateway + collector URLs) is injected via a ConfigMap-mounted
+# config.js that sets window.__GATEWAY_URL__ and window.__OTEL_COLLECTOR_URL__,
+# loaded before the app module in index.html. Adjust index.html to include it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-runtime-config
+  namespace: otel-lab
+data:
+  config.js: |
+    window.__GATEWAY_URL__ = "https://REPLACE-WITH-ELB-HOST";
+    window.__OTEL_COLLECTOR_URL__ = "https://REPLACE-WITH-COLLECTOR-HOST/v1/traces";
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: otel-lab
+  labels: { app: frontend }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: frontend } }
+  template:
+    metadata:
+      labels: { app: frontend }
+    spec:
+      containers:
+        - name: frontend
+          image: REPLACE-WITH-ECR/otel-lab-frontend:latest
+          ports: [{ containerPort: 80 }]
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits:   { cpu: "200m", memory: "128Mi" }
+          volumeMounts:
+            - name: runtime-config
+              mountPath: /usr/share/nginx/html/config.js
+              subPath: config.js
+      volumes:
+        - name: runtime-config
+          configMap: { name: frontend-runtime-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: otel-lab
+spec:
+  selector: { app: frontend }
+  ports:
+    - port: 80
+      targetPort: 80
+  type: ClusterIP   # expose via the existing ELB/ingress, or change to LoadBalancer

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OTel Lab — Console</title>
+  <!--
+    Set the server's traceparent here if you server-render. For the static demo
+    the browser SDK originates the trace. The collector URL can be injected:
+    <script>window.__OTEL_COLLECTOR_URL__ = "https://<elb-host>/v1/traces"</script>
+  -->
+  <style>
+    :root {
+      --bg: #0d1117;
+      --panel: #141a22;
+      --panel-2: #1b232e;
+      --line: #243040;
+      --ink: #e6edf3;
+      --ink-dim: #8b98a8;
+      --ink-faint: #5b6675;
+      --ok: #3fb950;
+      --warn: #d29922;
+      --err: #f85149;
+      --accent: #ff7a45;          /* signal orange — the one accent */
+      --mono: 'SF Mono','JetBrains Mono',ui-monospace,'Cascadia Code',Menlo,monospace;
+    }
+    * { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0; background: var(--bg); color: var(--ink);
+      font-family: var(--mono); font-size: 14px; line-height: 1.5;
+      letter-spacing: 0.2px;
+      background-image:
+        radial-gradient(circle at 50% -10%, rgba(255,122,69,0.06), transparent 60%);
+      min-height: 100vh;
+    }
+    .wrap { max-width: 880px; margin: 0 auto; padding: 28px 20px 60px; }
+
+    header { display:flex; align-items:baseline; justify-content:space-between;
+      border-bottom:1px solid var(--line); padding-bottom:14px; margin-bottom:24px; gap:16px; flex-wrap:wrap; }
+    .title { font-size:15px; letter-spacing:2px; text-transform:uppercase; color:var(--ink); }
+    .title b { color: var(--accent); font-weight:600; }
+    .session { font-size:11px; color:var(--ink-faint); }
+    .session span { color: var(--ink-dim); }
+
+    .lede { color: var(--ink-dim); font-size:13px; margin:0 0 24px; max-width:60ch; }
+    .lede b { color: var(--ink); font-weight:600; }
+
+    .actions { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:24px; }
+    button {
+      font-family: var(--mono); font-size:13px; letter-spacing:0.5px;
+      background: var(--panel-2); color: var(--ink); border:1px solid var(--line);
+      padding:11px 16px; border-radius:6px; cursor:pointer; transition: all .15s ease;
+    }
+    button:hover { border-color: var(--accent); color:#fff; }
+    button:active { transform: translateY(1px); }
+    button:disabled { opacity:.5; cursor:wait; }
+    button .k { color: var(--accent); }
+    button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:14px; margin-bottom:22px; }
+    @media (max-width:620px){ .grid { grid-template-columns:1fr; } }
+    .stat { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
+    .stat .lbl { font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:var(--ink-faint); margin-bottom:6px; }
+    .stat .val { font-size:24px; color:var(--ink); }
+    .stat .val.ok { color:var(--ok); } .stat .val.warn{ color:var(--warn);} .stat .val.err{ color:var(--err);} 
+    .stat .sub { font-size:11px; color:var(--ink-dim); margin-top:4px; }
+
+    .log { background:#0a0e13; border:1px solid var(--line); border-radius:8px;
+      padding:14px 16px; font-size:12.5px; min-height:180px; max-height:340px; overflow:auto; }
+    .log .row { display:flex; gap:10px; padding:3px 0; border-bottom:1px solid rgba(36,48,64,.4); }
+    .log .row:last-child { border-bottom:none; }
+    .log .t { color:var(--ink-faint); white-space:nowrap; }
+    .log .m { color:var(--ink-dim); flex:1; }
+    .log .m.ok { color:var(--ok);} .log .m.warn{color:var(--warn);} .log .m.err{color:var(--err);}
+    .log .m b { color: var(--ink); font-weight:600; }
+    .log .ph { color:var(--ink-faint); font-style:normal; }
+
+    .hint { margin-top:22px; font-size:11.5px; color:var(--ink-faint); border-top:1px solid var(--line); padding-top:14px; }
+    .hint code { color:var(--ink-dim); background:var(--panel-2); padding:1px 5px; border-radius:3px; }
+    @media (prefers-reduced-motion: reduce){ button{ transition:none; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="title">OTel Lab <b>·</b> Console</div>
+      <div class="session">session <span id="sid">—</span></div>
+    </header>
+
+    <p class="lede">
+      A real browser client for the lab. Every click is an <b>OpenTelemetry</b> span that
+      propagates W3C <b>traceparent</b> to the gateway — so a user action joins the same
+      trace as gateway → product-svc → postgres. Inject the network-policy fault and watch
+      a request hang from the <b>user's</b> side.
+    </p>
+
+    <div class="actions">
+      <button id="btn-products"><span class="k">GET</span> /products</button>
+      <button id="btn-recs"><span class="k">GET</span> /recommendations</button>
+      <button id="btn-loop"><span class="k">RUN</span> 10× (steady load)</button>
+    </div>
+
+    <div class="grid">
+      <div class="stat">
+        <div class="lbl">Last request</div>
+        <div class="val" id="last-status">idle</div>
+        <div class="sub" id="last-detail">no calls yet</div>
+      </div>
+      <div class="stat">
+        <div class="lbl">Latency (last)</div>
+        <div class="val" id="last-latency">—</div>
+        <div class="sub" id="last-vitals">web vitals streaming…</div>
+      </div>
+    </div>
+
+    <div class="log" id="log" aria-live="polite">
+      <div class="row"><span class="t ph">--:--:--</span><span class="m ph">console ready — instrumentation active</span></div>
+    </div>
+
+    <div class="hint">
+      Set the gateway base URL via <code>window.__GATEWAY_URL__</code> and the collector via
+      <code>window.__OTEL_COLLECTOR_URL__</code>. Defaults assume local port-forwards.
+    </div>
+  </div>
+
+  <script type="module" src="./index.js"></script>
+</body>
+</html>
