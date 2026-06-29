@@ -21,6 +21,8 @@ This is not a roadmap of intentions. The following is implemented, deployed, and
 - **A deterministic healthy-path gate** — if the two fault fingerprints (policy-deny drops and TCP failures) are both zero, the system returns "no anomaly" deterministically and never calls the LLM. The model explains problems; it does not decide whether one exists.
 - **LLM observability** — every Bedrock call emits a span with `gen_ai.*` attributes (model, token counts, cost, latency) in the same trace as the HTTP request.
 
+**In progress — EUM / RUM (Phase 9):** a browser frontend instrumented with the raw OpenTelemetry web SDK (not a vendor wrapper) that propagates the W3C `traceparent` to the gateway — so a user's click joins the same trace as gateway → product-svc → postgres. This adds the *user's view* to the network blindspot demo: the policy fault becomes visible as a real page hanging, traced end-to-end down to the POLICY_DENY drop. Code is complete (`frontend/`); cluster integration and CORS wiring pending.
+
 ---
 
 ## The money shot
@@ -55,6 +57,7 @@ The application trace alone says *something is slow.* The network signals say *c
 | 7 | OBI — NetO11y + StatsO11y + AppO11y | ✅ Complete |
 | 7.5 | AIOps upgrades — absolute window, richer signals, healthy-path gate | ✅ Complete |
 | 8 | On-prem bridge — k3s + NetFlow/sFlow via OTel | ⬜ Planned |
+| 9 | EUM / RUM — browser frontend, raw OTel web SDK, end-to-end trace stitch | 🔄 Built, integration pending |
 
 Beyond Phase 8, the lab extends toward multi-cloud (GCP GKE, Azure AKS), additional signal classes (audit logs, config/change events, SNMP), and the cost-to-business-requirement layer described above.
 
@@ -156,6 +159,7 @@ apps/
   gateway/        FastAPI gateway — routes /products, /recommendations, /diagnose
   llm-svc/        Bedrock-backed LLM service — recommendations + AIOps /diagnose
   product-svc/    FastAPI product service + PostgreSQL
+frontend/         EUM/RUM browser client — raw OTel web SDK, traceparent stitch (Phase 9)
 k8s/              OBI values, OTel Collector config, DynaKube, fault injection
 terraform/        eks/ (cluster + VPC + node group) · observability/ (module)
 docs/             interactive architecture diagrams

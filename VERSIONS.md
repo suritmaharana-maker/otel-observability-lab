@@ -48,6 +48,32 @@
 
 ---
 
+## Browser / EUM instrumentation — frontend (Phase 9)
+
+Raw OpenTelemetry web SDK in `frontend/`. Deliberately **not** a vendor wrapper (e.g. Grafana Faro), to keep the pipeline vendor-neutral and consistent with the backend.
+
+| Package | Pinned version | Source | Notes |
+|---|---|---|---|
+| `@opentelemetry/api` | **1.9.x** | npm | shared with backend |
+| `@opentelemetry/sdk-trace-web` | **2.0.x** | npm | browser tracer provider |
+| `@opentelemetry/sdk-trace-base` | **2.0.x** | npm | BatchSpanProcessor |
+| `@opentelemetry/exporter-trace-otlp-http` | **0.20x** | npm | OTLP/HTTP → Collector |
+| `@opentelemetry/context-zone` | **2.0.x** | npm | async context across events |
+| `@opentelemetry/core` | **2.0.x** | npm | W3CTraceContextPropagator |
+| `@opentelemetry/instrumentation` | **0.20x** | npm | registerInstrumentations |
+| `@opentelemetry/instrumentation-document-load` | **0.5x** | npm | page-load timings (separate version track) |
+| `@opentelemetry/instrumentation-fetch` | **0.20x** | npm | traceparent propagation to gateway |
+| `@opentelemetry/instrumentation-user-interaction` | **0.5x** | npm | click spans (separate version track) |
+| `web-vitals` | **4.x** | npm | LCP/INP/CLS/FCP/TTFB as OTel spans |
+
+> **Version-alignment rule (browser):** the core packages (`api`, `sdk-trace-web`, `sdk-trace-base`, `exporter-otlp-http`, `instrumentation`, `core`, `context-zone`) must come from one compatible release cycle — same discipline as the Python/Node SDKs. The `instrumentation-document-load` and `instrumentation-user-interaction` packages version on a **separate 0.5x track** and lag the core; pin them to the latest stable that declares compatibility with the core version in use. **Run `npm outdated` and verify against npm before building — versions above are indicative and not yet cluster-verified.**
+
+> **Browser SDK maturity:** OpenTelemetry browser instrumentation is officially **experimental** and RUM is not yet a first-class OTel signal — vitals/interactions are modeled as spans + attributes. Acceptable for the lab; note the caveat for production.
+
+> **CORS requirement:** the gateway routes and the Collector OTLP/HTTP receiver must allow the browser origin and the `traceparent` request header (`Access-Control-Allow-Headers`). This is the most common first-run snag.
+
+---
+
 ## LLM observability — OpenLLMetry
 
 | Package | Pinned version | Source |
@@ -243,3 +269,4 @@ Add `renovate.json` to the repo root to auto-track version bumps:
 | Jun 22, 2026 | Beyla TCP retransmit metric | assumed exposed | not user-facing | Verified against live endpoint; `tcp_retransmit_skb` is internal only |
 | Jun 22, 2026 | llm-svc | 0.6.0 | 0.7.0 | Absolute time window + 3 new signals + deterministic healthy-path gate |
 | Jun 22, 2026 | AIOps model | (not recorded) | Amazon Nova Micro | Confirmed via /diagnose response model field |
+| Jun 28, 2026 | EUM/RUM frontend | (none) | added (Phase 9) | Raw OTel web SDK in frontend/ — browser spans, traceparent stitch, Web Vitals; chose raw OTel over Grafana Faro for vendor-neutrality |
