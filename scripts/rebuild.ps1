@@ -53,10 +53,8 @@ kubectl apply -f k8s\otelcol-config.yaml
 kubectl rollout restart daemonset/otelcol -n observability
 kubectl rollout status daemonset/otelcol -n observability --timeout=120s
 
-# --- 6. Beyla + OBI (eBPF instrumentation) ---
-Write-Host "`n[6/7] Installing Beyla + OBI via Helm..." -ForegroundColor Yellow
-helm upgrade --install beyla grafana/beyla -n otel-lab -f helm\beyla-values.yaml
-kubectl rollout status daemonset/beyla -n otel-lab --timeout=120s
+# --- 6. OBI (eBPF instrumentation) ---
+Write-Host "`n[6/7] Installing OBI via Helm..." -ForegroundColor Yellow
 helm upgrade --install obi open-telemetry/opentelemetry-ebpf-instrumentation -n observability -f k8s\obi-values.yaml --version 0.10.0
 kubectl rollout status daemonset/obi-opentelemetry-ebpf-instrumentation -n observability --timeout=120s
 
