@@ -219,6 +219,31 @@ resource "helm_release" "cilium" {
 # Nodes join AFTER Cilium is ready. Cilium removes the agent-not-ready taint
 # automatically once it has initialised on each node.
 
+# -- LAUNCH TEMPLATE -- IMDS hop limit fix ---------------------------------
+# Default EC2 launch config uses HttpPutResponseHopLimit=1. Cilium ENI-mode
+# pod routing adds a hop, so pod-originated IMDS requests (e.g. boto3
+# fetching node-role credentials for Bedrock) get dropped before reaching
+# the metadata service, failing with botocore.exceptions.NoCredentialsError.
+# hop_limit=2 fixes this permanently. (Previously only patched live via
+# `aws ec2 modify-instance-metadata-options`, which does not survive a
+# node group replacement or fresh rebuild.)
+resource "aws_launch_template" "node" {
+  name_prefix = "${var.cluster_name}-node-"
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 2
+  }
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name = "${var.cluster_name}-node"
+    }
+  }
+}
+
 resource "aws_eks_node_group" "main" {
   cluster_name    = module.eks.cluster_name
   node_group_name = "${var.cluster_name}-main"
@@ -226,6 +251,11 @@ resource "aws_eks_node_group" "main" {
   subnet_ids      = module.vpc.private_subnets
 
   instance_types = [var.node_instance_type]
+
+  launch_template {
+    id      = aws_launch_template.node.id
+    version = aws_launch_template.node.latest_version
+  }
 
   scaling_config {
     desired_size = var.node_count
