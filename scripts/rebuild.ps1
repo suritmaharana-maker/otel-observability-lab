@@ -57,7 +57,7 @@ kubectl rollout status daemonset/otelcol -n observability --timeout=120s
 Write-Host "`n[6/7] Installing Beyla + OBI via Helm..." -ForegroundColor Yellow
 helm upgrade --install beyla grafana/beyla -n otel-lab -f helm\beyla-values.yaml
 kubectl rollout status daemonset/beyla -n otel-lab --timeout=120s
-helm upgrade --install obi open-telemetry/opentelemetry-ebpf-instrumentation -n observability -f k8s\obi-values.yaml
+helm upgrade --install obi open-telemetry/opentelemetry-ebpf-instrumentation -n observability -f k8s\obi-values.yaml --version 0.9.4
 kubectl rollout status daemonset/obi-opentelemetry-ebpf-instrumentation -n observability --timeout=120s
 
 # --- 7. App workloads + verification ---

@@ -49,10 +49,6 @@ config:
       endpoint: "http://otelcol.observability.svc.cluster.local:4317"
       protocol: grpc
 
-    otel_traces_export:
-      endpoint: "http://otelcol.observability.svc.cluster.local:4317"
-      protocol: grpc
-
     attributes:
       kubernetes:
         enable: true
