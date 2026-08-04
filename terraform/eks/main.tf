@@ -204,7 +204,13 @@ resource "helm_release" "cilium" {
   wait    = true
   timeout = 600
 
-  values = [file("${path.module}/../../helm/cilium-values.yaml")]
+  values = [
+    file("${path.module}/../../helm/cilium-values.yaml"),
+    yamlencode({
+      k8sServiceHost = replace(module.eks.cluster_endpoint, "https://", "")
+      k8sServicePort = 443
+    })
+  ]
 
   depends_on = [null_resource.patch_aws_node]
 }
@@ -231,7 +237,7 @@ resource "aws_eks_node_group" "main" {
     max_unavailable = 1
   }
 
-  # Ubuntu 24.04 kernel 6.8 — testing Pixie bpftrace compatibility (6.8 < 6.10 broken threshold)
+  # Ubuntu 24.04 kernel 6.8 ï¿½ testing Pixie bpftrace compatibility (6.8 < 6.10 broken threshold)
   ami_type = "AL2023_x86_64_STANDARD"
 
   # Required by Cilium 1.19 docs for EKS managed node groups

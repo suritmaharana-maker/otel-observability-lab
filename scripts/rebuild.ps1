@@ -38,6 +38,7 @@ kubectl rollout status statefulset/postgres -n otel-lab --timeout=180s
 # (source of truth as of the 2026-08-03 live/local sync - see CLAUDE_CONTEXT.md)
 Write-Host "`n[4/7] Applying dash0-secret and code ConfigMaps..." -ForegroundColor Yellow
 kubectl apply -f backup\secrets\dash0-secret.yaml
+kubectl get secret dash0-secret -n observability -o json | ForEach-Object { $_ -replace '"namespace": "observability"', '"namespace": "otel-lab"' } | kubectl apply -f -
 kubectl create configmap gateway-code -n otel-lab --from-file=main.py=apps\gateway\main.py --dry-run=client -o yaml | kubectl apply -f -
 kubectl create configmap product-svc-code -n otel-lab --from-file=main.py=apps\product-svc\product_svc.py --dry-run=client -o yaml | kubectl apply -f -
 
