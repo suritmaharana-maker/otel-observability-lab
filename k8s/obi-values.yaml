@@ -48,6 +48,7 @@ config:
     otel_metrics_export:
       endpoint: "http://otelcol.observability.svc.cluster.local:4317"
       protocol: grpc
+      interval: 15s
 
     attributes:
       kubernetes:
