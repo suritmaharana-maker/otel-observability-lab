@@ -27,6 +27,7 @@ from opentelemetry.propagate import set_global_textmap
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 import httpx
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 OTEL_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otelcol.observability.svc.cluster.local:4317")
 
@@ -89,7 +90,14 @@ logging.getLogger().addHandler(stdout_handler)
 
 HTTPXClientInstrumentor().instrument()
 app = FastAPI(title="OTel Lab - API Gateway", version="0.5.0")
-FastAPIInstrumentor.instrument_app(app)
+FastAPIInstrumentor.instrument_app(app, exclude_spans=["send", "receive"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=False,
+)
 
 logger = logging.getLogger("gateway")
 PRODUCT_SVC_URL = os.getenv("PRODUCT_SVC_URL", "http://product-svc:8001")

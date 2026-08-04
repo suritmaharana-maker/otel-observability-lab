@@ -8,7 +8,7 @@
 # Required: EKS API server endpoint (without https://)
 # Cilium cannot reach k8s API before networking is initialised without this
 # Source: cilium.io/blog/2025/06/19/eks-eni-install/
-k8sServiceHost: 99B389CBB5B02A44A96D570AA7358F4E.gr7.us-east-2.eks.amazonaws.com
+k8sServiceHost: 9A8134FCF08D64E245A6D62D9139E198.gr7.us-east-2.eks.amazonaws.com
 k8sServicePort: 443
 
 # ENI / IPAM
