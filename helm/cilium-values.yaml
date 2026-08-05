@@ -56,7 +56,7 @@ hubble:
     enabled:
       - dns
       - drop
-      - tcp
+      - tcp:sourceContext=workload-name;destinationContext=workload-name
       - flow
       - port-distribution
       - icmp
