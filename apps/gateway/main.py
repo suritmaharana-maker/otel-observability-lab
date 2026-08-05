@@ -22,7 +22,6 @@ from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-from opentelemetry.instrumentation.logging import LoggingInstrumentor
 from opentelemetry.propagate import set_global_textmap
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 import httpx
@@ -50,7 +49,15 @@ set_logger_provider(logger_provider)
 otel_handler = LoggingHandler(level=logging.DEBUG, logger_provider=logger_provider)
 logging.getLogger().addHandler(otel_handler)
 logging.getLogger().setLevel(logging.INFO)
-LoggingInstrumentor().instrument(set_logging_format=True)
+# NOTE: LoggingInstrumentor().instrument() intentionally NOT called here.
+# It independently emits its own OTLP log record for every logger call,
+# duplicating what otel_handler (LoggingHandler) already sends - confirmed
+# in Dash0 as two entries sharing the same span/trace ID and timestamp,
+# one with 8 attributes (code.filepath/function/lineno from LoggingHandler)
+# and one with only 5 (LoggingInstrumentor's path, no code.* enrichment).
+# Trace-context correlation in stdout logs is already handled manually by
+# OTelJSONFormatter below, so LoggingInstrumentor added nothing but the
+# duplicate.
 
 structlog.configure(
     processors=[
