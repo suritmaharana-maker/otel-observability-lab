@@ -145,18 +145,32 @@ async def collect_dash0_signals(win: dict, service: str) -> dict:
     """
     signals = {}
 
-    # Hubble policy drops
+    # Hubble policy drops. Cilium emits POLICY-based drops under two distinct
+    # reason strings depending on enforcement layer (confirmed live in this
+    # cluster: POLICY_DENY=6535, POLICY_DENIED=14, occurring simultaneously) -
+    # both mean "a policy blocked this packet" so both count toward this signal.
+    # UNSUPPORTED_L3_PROTOCOL is tracked separately: it's a datapath protocol
+    # support gap, not a policy decision, so it must not be merged into the
+    # policy-deny bucket or it would misattribute root cause.
     drops = await query_dash0("increase(hubble_drop_total[RANGE][RANGE_END])", win)
     policy_deny = 0.0
+    unsupported_l3 = 0.0
     for d in drops:
         m = d.get("metric", {})
-        if isinstance(m, dict) and m.get("reason") == "POLICY_DENY":
-            try:
-                v = d.get("value", [0, "0"])
-                policy_deny += float(v[1]) if isinstance(v, list) else 0.0
-            except Exception:
-                pass
+        if not isinstance(m, dict):
+            continue
+        reason = m.get("reason")
+        try:
+            v = d.get("value", [0, "0"])
+            val = float(v[1]) if isinstance(v, list) else 0.0
+        except Exception:
+            val = 0.0
+        if reason in ("POLICY_DENY", "POLICY_DENIED"):
+            policy_deny += val
+        elif reason == "UNSUPPORTED_L3_PROTOCOL":
+            unsupported_l3 += val
     signals["hubble_drop_total_policy_deny"] = round(policy_deny, 2)
+    signals["hubble_drop_total_unsupported_l3_protocol"] = round(unsupported_l3, 2)
 
     # HTTP 5xx errors
     err = await query_dash0(
@@ -301,8 +315,12 @@ def build_prompt(signals: dict, service: str, backend: str) -> str:
 SIGNALS FROM DASH0 PROMETHEUS API ({signals.get('window','last 5m')}):
 
 Network policy layer (L3/L4):
-- hubble_drop_total (POLICY_DENY): {signals.get('hubble_drop_total_policy_deny', 0)} drops
+- hubble_drop_total (POLICY_DENY + POLICY_DENIED): {signals.get('hubble_drop_total_policy_deny', 0)} drops
   → non-zero means Cilium is actively DENYING packets at the policy layer
+- hubble_drop_total (UNSUPPORTED_L3_PROTOCOL): {signals.get('hubble_drop_total_unsupported_l3_protocol', 0)} drops
+  → this is a DIFFERENT root cause from a policy block: it means the datapath
+    doesn't support that packet's L3 protocol (e.g. stray IPv6/multicast
+    traffic). Do not attribute this to a network policy issue.
 
 Application HTTP layer:
 - HTTP 5xx errors: {signals.get('http_5xx_count', 0)}
