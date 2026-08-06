@@ -56,11 +56,10 @@ if ($remaining) {
 }
 
 # --- 4. Terraform destroy ---
-# NOT auto-approved on purpose - terraform's own interactive "yes" prompt
-# is the last safety gate before deleting real infrastructure.
-Write-Host "`n[4/5] Running terraform destroy (you will be asked to confirm)..." -ForegroundColor Yellow
+# Auto-approved (fire-and-forget mode) - no interactive confirmation.
+Write-Host "`n[4/5] Running terraform destroy (auto-approved, no confirmation)..." -ForegroundColor Yellow
 Set-Location terraform\eks
-terraform destroy
+terraform destroy -auto-approve
 Set-Location (Join-Path $PSScriptRoot "..")
 
 # --- 5. Post-destroy billing sweep ---

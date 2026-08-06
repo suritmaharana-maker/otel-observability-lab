@@ -16,10 +16,11 @@ Write-Host "Full session log: $logFile" -ForegroundColor DarkGray
 
 # --- 1. Terraform apply ---
 # Creates VPC, NAT, EKS cluster, nodegroup, IAM, cilium (helm_release in
-# state), and namespaces otel-lab/observability. NOT auto-approved.
-Write-Host "`n[1/7] terraform apply (you will be asked to confirm)..." -ForegroundColor Yellow
+# state), and namespaces otel-lab/observability. Auto-approved
+# (fire-and-forget mode) - no interactive confirmation.
+Write-Host "`n[1/7] terraform apply (auto-approved, no confirmation)..." -ForegroundColor Yellow
 Set-Location terraform\eks
-terraform apply
+terraform apply -auto-approve
 Set-Location (Join-Path $PSScriptRoot "..")
 
 # --- 2. Kubeconfig + wait for nodes ---
