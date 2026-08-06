@@ -49,3 +49,81 @@ the way otelcol's connections show both directions cleanly.
    sourced connections may have asymmetric capture points vs pure
    pod-to-pod).
 3. Cross-check obi_stat_tcp_retransmits for the same gap.
+
+
+---
+
+## OPEN ISSUE: hubble_drop_total POLICY_DENY/POLICY_DENIED not being recorded
+
+Status: unresolved. Cilium restart attempted, did not fix it.
+Date found: 2026-08-06
+
+### Expected behavior
+When a CiliumNetworkPolicy blocks traffic (ingressDeny), Hubble should
+record a DROPPED-verdict flow with reason=POLICY_DENY or
+POLICY_DENIED, exported as hubble_drop_total. This worked reliably
+earlier the same day (real values like baseline 0->106, 0->15.1 were
+used successfully in /diagnose testing).
+
+### What's confirmed broken
+- hubble_drop_total{reason=~"POLICY_DENY|POLICY_DENIED"} returns ZERO
+  series/data during multiple genuine, confirmed-active fault windows
+  - checked across two full fault cycles from Surit's continuous
+  fault-test run (05:26:41-05:31:25 and 05:35:51-05:40:48 UTC), and
+  again in a controlled manual test after a full cilium DaemonSet
+  restart (06:03:32-06:04:13 UTC).
+- Raw `hubble observe --verdict DROPPED` for the gateway pod shows
+  NOTHING during an active fault window, even with real traffic
+  concurrently hitting the blocked endpoint.
+- UNSUPPORTED_L3_PROTOCOL reason continues to record fine throughout
+  (confirmed value=402 during the same window POLICY_DENY was
+  missing) - so the hubble_drop_total metric pipeline itself works in
+  general; this is specific to the POLICY_DENY/POLICY_DENIED reason.
+
+### What's confirmed NOT the cause (ruled out)
+- Not a broken fault: verified twice, before and after the cilium
+  restart, that gateway->product-svc requests genuinely time out
+  while the policy is applied. Enforcement is 100% intact.
+- Not an otelcol/export pipeline issue: this is upstream of otelcol -
+  Hubble's own live `hubble observe` stream shows nothing, so the gap
+  is in Hubble's flow generation/capture itself, not in shipping it
+  onward.
+- Not a metric-name bug: same query pattern that worked earlier today
+  (and still works for UNSUPPORTED_L3_PROTOCOL right now) returns
+  nothing specifically for POLICY_DENY/POLICY_DENIED.
+- Not buffer pressure / stale daemon state: `cilium-dbg status
+  --verbose` showed Hubble's flow buffer at 100% capacity
+  (4095/4095) before the restart - a plausible suspect - but a full
+  `kubectl rollout restart daemonset cilium -n kube-system` reset the
+  buffer to 15.92% (652/4095) and the problem persisted identically
+  afterward. Cluster health, all app pods, and fault enforcement were
+  all confirmed unaffected by the restart.
+
+### Not yet checked
+- cilium-dbg policy trace for the specific gateway->product-svc flow,
+  to see Cilium's own internal verdict/reasoning for this exact policy
+  evaluation.
+- monitor-aggregation settings (a Cilium feature that can suppress
+  repeated flow notifications for efficiency) - not yet inspected to
+  see if it's set more aggressively than expected, or changed
+  recently.
+- Whether this correlates with anything else that changed today
+  (e.g. the helm/cilium-values.yaml hubble tcp sourceContext change
+  from a related session, or the otelcol filelog receiver addition -
+  neither obviously touches drop-reason classification, but not
+  fully ruled out).
+- cilium-agent's own native /metrics (typically port 9962) - attempted
+  a port-forward to cross-check against a lower-level counter
+  independent of Hubble's flow-log path, but the port wasn't
+  listening/exposed as configured; container only declares health
+  (9879), peer-service (4244), and hubble-metrics (9965) ports.
+
+### Next step when resumed
+1. `cilium-dbg policy trace` for a live gateway->product-svc flow
+   during an active fault, to see Cilium's own verdict computation
+   directly rather than inferring from Hubble's output.
+2. Check monitor-aggregation config explicitly (`cilium-dbg config`
+   or the live daemonset's flags/helm values).
+3. Find cilium-agent's actual metrics port/config if native metrics
+   are enabled at all, to get an independent counter to compare
+   against Hubble's flow-log-derived one.
