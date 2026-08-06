@@ -293,6 +293,9 @@ async def collect_dash0_timeseries_signals(win: dict, service: str) -> dict:
             'sum(increase(http_server_request_duration_seconds_count'
             '{http_response_status_code=~"5.."}[30s]))'
         ),
+        "cilium_policy_change_event": (
+            'sum(increase(dash0_logs_total{service_name="cilium-policy-events"}[30s]))'
+        ),
     }
 
     findings = {}
@@ -487,6 +490,7 @@ SIGNAL_DESCRIPTIONS = {
     "obi_tcp_failed_connections": "TCP handshakes from gateway that failed to complete (eBPF-observed) - SCOPED to this service pair only",
     "product_svc_spans": "application spans emitted by product-svc's own OTel SDK - reflects whether requests actually reached and were processed by the service - SCOPED to this service pair only",
     "http_5xx_count": "HTTP 5xx server error responses returned by gateway",
+    "cilium_policy_change_event": "CHANGE RECORD, not a symptom: a count of Cilium's own audit-trail log lines ('Imported CiliumNetworkPolicy' / 'Deleted CiliumNetworkPolicy'), captured directly from cilium-agent's logs. Every other signal in this analysis is a symptom - a downstream metric shift. This one is the actual event that could have CAUSED those shifts. A change point here landing at the same time as the symptom signals is direct evidence of causation, not just correlation - weight it much more heavily than any symptom-only correlation.",
 }
 
 
@@ -537,6 +541,14 @@ Each signal below was analyzed as a real time series (not a single aggregated
 number): a baseline was computed from the early part of the window, and each
 series was checked for a statistically significant shift away from that
 baseline (3-sigma threshold crossing).
+
+IMPORTANT: one of these signals (cilium_policy_change_event) is a CHANGE
+RECORD, not a symptom - it's Cilium's own audit log of policy objects being
+created or deleted. Every other signal is a downstream metric that reacts
+to something happening; this one IS the something. If its change point lines
+up with the symptom signals, that's actual causal evidence, not inference
+from correlated symptoms - prefer it over any conclusion built only from
+symptoms shifting together.
 
 {chr(10).join(lines)}
 
