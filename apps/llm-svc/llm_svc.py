@@ -10,7 +10,7 @@ Phase 7 changes:
   obi.stat.tcp.failed.connections, dash0.spans (product-svc).
 - Prompt reframed to walk the proven causal chain across all signals.
 """
-import os, json, logging, asyncio, time
+import os, json, logging, asyncio, time, statistics
 from datetime import datetime, timezone
 import boto3
 import httpx
@@ -133,6 +133,179 @@ async def query_dash0(metric_expr: str, win: dict) -> list:
     except Exception as e:
         log.warning("dash0_query_error", extra={"error": str(e)})
     return []
+
+
+async def query_dash0_range(metric_expr: str, win: dict, step: str = "15s") -> list:
+    """Query Dash0's Prometheus range-query API, returning a genuine time
+    series (not a single scalar). `metric_expr` should be a complete PromQL
+    expression with its own small lookback window baked in (e.g.
+    "sum(increase(x[30s]))") - that 30s is independent of the overall
+    diagnose window (win["range"]), which only controls how far back the
+    range query itself starts.
+
+    v1 of the redesign described to Surit: feed real time series to the
+    change-point detector below instead of a single aggregated number, so
+    /diagnose can tell a brief spike from sustained elevation within the
+    window - which a scalar increase() can never distinguish.
+    """
+    end_epoch = win.get("anchor_epoch") or time.time()
+    range_s = int(win["range"].rstrip("s")) if win["range"].endswith("s") else 300
+    start_epoch = end_epoch - range_s
+
+    url = f"{DASH0_PROM_URL}/api/v1/query_range"
+    headers = {"Authorization": f"Bearer {DASH0_AUTH_TOKEN}"}
+    params = {
+        "query": metric_expr,
+        "start": f"{start_epoch:.3f}",
+        "end": f"{end_epoch:.3f}",
+        "step": step,
+    }
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, headers=headers, params=params, timeout=15.0)
+            if r.status_code == 200:
+                data = r.json()
+                return data.get("data", {}).get("result", [])
+            log.warning("dash0_range_query_failed", extra={"status": r.status_code, "query": metric_expr})
+    except Exception as e:
+        log.warning("dash0_range_query_error", extra={"error": str(e)})
+    return []
+
+
+def detect_change_point(points: list, baseline_fraction: float = 0.3, z_threshold: float = 3.5) -> dict | None:
+    """Lightweight change-point detector using a MAD-based modified z-score
+    (Iglewicz & Hoaglin) against a rolling baseline.
+
+    This is a simplified, explainable v1 of the change-point detection
+    family used in production multivariate RCA research (e.g. multivariate
+    Bayesian Online Change Point Detection in BARO, ACM 2024) - not full
+    BOCPD, but the same underlying idea: find WHEN a series' behavior
+    shifts and by how much, rather than collapsing the whole window into
+    one number.
+
+    Uses MEDIAN + MEDIAN ABSOLUTE DEVIATION for the baseline, not mean/
+    stdev. This matters in practice: with a fixed baseline_fraction, if the
+    incident starts early in the window, a plain mean/stdev baseline can
+    absorb a minority of already-shifted points and get dragged toward
+    them, masking the very shift it's supposed to detect (found via a real
+    test: 5-point baseline of [0,0,0,65,90] gives mean~31, hiding a real
+    0->65+ shift). Median is robust to that contamination as long as the
+    majority of the baseline window is still pre-incident.
+
+    `points`: list of [timestamp, value] pairs as returned by Prometheus'
+    range-query API (already time-ordered). Returns None if there aren't
+    enough points or no crossing is found.
+    """
+    if not points or len(points) < 4:
+        return None
+
+    parsed = []
+    for p in points:
+        try:
+            parsed.append((float(p[0]), float(p[1])))
+        except (ValueError, IndexError, TypeError):
+            continue
+    if len(parsed) < 4:
+        return None
+
+    n_baseline = max(2, int(len(parsed) * baseline_fraction))
+    baseline_vals = [v for _, v in parsed[:n_baseline]]
+    baseline_median = statistics.median(baseline_vals)
+    mad = statistics.median([abs(v - baseline_median) for v in baseline_vals])
+    # 1.4826 scales MAD to be comparable to a standard deviation for
+    # normally-distributed data - the standard constant for this method.
+    threshold_delta = max(mad * 1.4826 * z_threshold, 0.01)
+
+    for ts, val in parsed[n_baseline:]:
+        delta = val - baseline_median
+        if abs(delta) >= threshold_delta:
+            pct = (delta / baseline_median * 100) if baseline_median != 0 else None
+            return {
+                "change_detected": True,
+                "change_point_epoch": ts,
+                "baseline_mean": round(baseline_median, 3),
+                "shifted_value": round(val, 3),
+                "direction": "increase" if delta > 0 else "decrease",
+                "magnitude_pct": round(pct, 1) if pct is not None else None,
+            }
+    return None
+
+
+def correlate_change_points(findings: dict, tolerance_s: float = 20.0) -> list:
+    """Group signals whose change points landed within `tolerance_s` seconds
+    of at least one other detected change point.
+
+    Each signal is already scoped to a specific service edge via its own
+    PromQL query (e.g. gateway->product-svc), so this is the topology-aware
+    part of the design: rather than blindly correlating every metric against
+    every other metric, we only ask whether signals we ALREADY know are on
+    the same architectural edge also moved at the same TIME. A signal that
+    shifts far from the rest (or never shifts at all, like
+    UNSUPPORTED_L3_PROTOCOL in prior testing) is evidence it's unrelated
+    background noise, not part of the incident.
+    """
+    detected = {
+        name: f["change_point_epoch"]
+        for name, f in findings.items()
+        if isinstance(f, dict) and f.get("change_detected")
+    }
+    if len(detected) < 2:
+        return list(detected.keys())
+
+    times = list(detected.values())
+    correlated = [
+        name for name, t in detected.items()
+        if any(abs(t - other_t) <= tolerance_s for other_name, other_t in detected.items() if other_name != name)
+    ]
+    return correlated
+
+
+async def collect_dash0_timeseries_signals(win: dict, service: str) -> dict:
+    """Collect genuine time-series signals and run change-point detection on
+    each. Called ONLY on the fault-diagnosis path, after the (cheap, scalar)
+    deterministic gate has already decided something needs investigating -
+    this is more expensive (query_range + per-signal detection) so it's
+    reserved for windows the gate has flagged as non-healthy.
+
+    Each query uses a fixed 30s sub-window for increase(), independent of
+    the overall diagnose window, so change-point resolution stays
+    consistent whether the incident window is 1 minute or 15.
+    """
+    metric_queries = {
+        "hubble_drop_policy_deny": (
+            'sum(increase(hubble_drop_total{reason=~"POLICY_DENY|POLICY_DENIED"}[30s]))'
+        ),
+        "hubble_drop_unsupported_l3": (
+            'sum(increase(hubble_drop_total{reason="UNSUPPORTED_L3_PROTOCOL"}[30s]))'
+        ),
+        "obi_network_flow_bytes": (
+            f'sum(increase(obi_network_flow_bytes{{k8s_src_owner_name="{service}",'
+            f'k8s_dst_owner_name="product-svc",k8s_dst_owner_type="Service"}}[30s]))'
+        ),
+        "obi_tcp_failed_connections": (
+            f'sum(increase(obi_stat_tcp_failed_connections{{k8s_src_owner_name="{service}"}}[30s]))'
+        ),
+        "product_svc_spans": (
+            'sum(increase(dash0_spans_total{service_name="product-svc",'
+            'telemetry_sdk_name="opentelemetry"}[30s]))'
+        ),
+        "http_5xx_count": (
+            'sum(increase(http_server_request_duration_seconds_count'
+            '{http_response_status_code=~"5.."}[30s]))'
+        ),
+    }
+
+    findings = {}
+    for name, expr in metric_queries.items():
+        series = await query_dash0_range(expr, win, step="15s")
+        points = series[0].get("values", []) if series else []
+        cp = detect_change_point(points)
+        findings[name] = cp if cp else {"change_detected": False}
+
+    findings["_correlated_signals"] = correlate_change_points(findings)
+    findings["backend"] = "dash0"
+    findings["window"] = win["label"]
+    return findings
 
 
 async def collect_dash0_signals(win: dict, service: str) -> dict:
@@ -307,45 +480,84 @@ async def collect_dynatrace_signals(win: dict, service: str) -> dict:
 # LLM RCA ENGINE
 # ─────────────────────────────────────────────
 
-def build_prompt(signals: dict, service: str, backend: str) -> str:
+SIGNAL_DESCRIPTIONS = {
+    "hubble_drop_policy_deny": "packets dropped by a Cilium network policy (L3/L4 access control decision) - SCOPED to this service pair only",
+    "hubble_drop_unsupported_l3": "packets dropped because the datapath doesn't support that L3 protocol (e.g. stray IPv6/multicast) - NOT a policy decision, and this signal is CLUSTER-WIDE/unscoped, not specific to this service pair. It can be triggered by unrelated traffic anywhere in the cluster, so a correlated-in-time shift here is weaker evidence than a shift in a signal that's actually scoped to gateway/product-svc.",
+    "obi_network_flow_bytes": f"bytes on the wire from gateway toward product-svc (eBPF-observed) - SCOPED to this service pair only",
+    "obi_tcp_failed_connections": "TCP handshakes from gateway that failed to complete (eBPF-observed) - SCOPED to this service pair only",
+    "product_svc_spans": "application spans emitted by product-svc's own OTel SDK - reflects whether requests actually reached and were processed by the service - SCOPED to this service pair only",
+    "http_5xx_count": "HTTP 5xx server error responses returned by gateway",
+}
+
+
+def _format_finding(name: str, f: dict) -> str:
+    desc = SIGNAL_DESCRIPTIONS.get(name, name)
+    if not f.get("change_detected"):
+        return f"- {name} ({desc}): no significant change detected in this window"
+    direction = f["direction"]
+    mag = f.get("magnitude_pct")
+    mag_str = f"{mag:+.0f}%" if mag is not None else "from a zero baseline"
+    offset = f.get("_offset_s")
+    when = f" at ~t+{offset:.0f}s" if offset is not None else ""
+    return (
+        f"- {name} ({desc}): shifted from baseline {f['baseline_mean']} to "
+        f"{f['shifted_value']} ({direction}, {mag_str}){when}"
+    )
+
+
+def build_prompt(signals: dict, service: str, backend: str, findings: dict | None = None) -> str:
     backend_context = ""
 
-    if backend == "dash0":
+    if backend == "dash0" and findings:
+        # Compute each change point's offset from the window start, for a
+        # human-readable timeline instead of raw epoch seconds.
+        window_start = min(
+            (f["change_point_epoch"] for f in findings.values()
+             if isinstance(f, dict) and f.get("change_detected")),
+            default=None,
+        )
+        lines = []
+        for name, f in findings.items():
+            if name.startswith("_") or name in ("backend", "window"):
+                continue
+            if isinstance(f, dict) and f.get("change_detected") and window_start is not None:
+                f = dict(f)
+                f["_offset_s"] = f["change_point_epoch"] - window_start
+            lines.append(_format_finding(name, f))
+
+        correlated = findings.get("_correlated_signals", [])
+        correlation_note = (
+            f"Signals whose change points landed within ~20s of each other "
+            f"(evidence they may share a root cause): {', '.join(correlated) if correlated else 'none - no two signals shifted at the same time'}"
+        )
+
         backend_context = f"""
-SIGNALS FROM DASH0 PROMETHEUS API ({signals.get('window','last 5m')}):
+TIME-SERIES CHANGE-POINT ANALYSIS ({findings.get('window','last 5m')}):
+Each signal below was analyzed as a real time series (not a single aggregated
+number): a baseline was computed from the early part of the window, and each
+series was checked for a statistically significant shift away from that
+baseline (3-sigma threshold crossing).
 
-Network policy layer (L3/L4):
-- hubble_drop_total (POLICY_DENY + POLICY_DENIED): {signals.get('hubble_drop_total_policy_deny', 0)} drops
-  → non-zero means Cilium is actively DENYING packets at the policy layer
-- hubble_drop_total (UNSUPPORTED_L3_PROTOCOL): {signals.get('hubble_drop_total_unsupported_l3_protocol', 0)} drops
-  → this is a DIFFERENT root cause from a policy block: it means the datapath
-    doesn't support that packet's L3 protocol (e.g. stray IPv6/multicast
-    traffic). Do not attribute this to a network policy issue.
+{chr(10).join(lines)}
 
-Application HTTP layer:
+{correlation_note}
+
+Signals with NO detected change are evidence AGAINST that layer being
+involved. A signal shifting alone, uncorrelated with any other signal, is
+weaker evidence than a cluster of signals shifting together.
+"""
+
+    elif backend == "dash0":
+        # Fallback: no findings supplied, use the plain scalar signals.
+        backend_context = f"""
+SIGNALS FROM DASH0 PROMETHEUS API ({signals.get('window','last 5m')}), aggregated
+over the whole window (no per-signal timing available):
+- hubble_drop_total (POLICY_DENY + POLICY_DENIED): {signals.get('hubble_drop_total_policy_deny', 0)}
+- hubble_drop_total (UNSUPPORTED_L3_PROTOCOL): {signals.get('hubble_drop_total_unsupported_l3_protocol', 0)}
 - HTTP 5xx errors: {signals.get('http_5xx_count', 0)}
-- HTTP total requests: {signals.get('http_total_count', 0)}
-- HTTP error rate: {signals.get('http_error_rate_pct', 0)}%
-
-Network flow layer (eBPF):
-- Beyla network flow bytes from {service}: {signals.get('network_flow_bytes', 0)} bytes
 - OBI network flow bytes {service}→product-svc: {signals.get('obi_network_flow_bytes', 0)} bytes
-  → a DROP here means application traffic stopped flowing on the wire
-
-TCP connection layer (eBPF StatsO11y):
 - OBI TCP failed connections from {service}: {signals.get('obi_tcp_failed_connections', 0)}
-  → a SPIKE here means TCP handshakes from {service} are failing
-
-Application span layer (OTel SDK):
 - product-svc spans emitted: {signals.get('product_svc_spans', 0)}
-  → ZERO spans means no request ever reached product-svc
-
-CAUSAL CHAIN TO EVALUATE:
-A Cilium network policy block produces a characteristic signature: POLICY_DENY
-drops SPIKE → network flow bytes DROP → TCP failed connections SPIKE → product-svc
-spans fall to ZERO, while the app returns 5xx. Assess how many of these signals
-align with that signature and weight your confidence accordingly. If the network
-signals fire but app spans are non-zero, consider partial/degraded faults instead.
 """
 
     elif backend == "dynatrace":
@@ -360,27 +572,43 @@ SIGNALS FROM DYNATRACE DAVIS AI + PROBLEMS API v2 ({signals.get('window','last 5
 - Davis AI problem ID: {signals.get('davis_problem_id', 'none')}
 """
 
-    return f"""You are an expert SRE analyzing a Kubernetes microservices incident.
+    return f"""You are an expert SRE performing differential diagnosis on a Kubernetes
+microservices incident. Do not assume the cause in advance - reason from the
+evidence to a conclusion, the way a human on-call engineer would.
 
 ARCHITECTURE:
 - gateway (port 8000) → product-svc (port 8001) → postgres (port 5432)
 - gateway (port 8000) → llm-svc (port 8002) → AWS Bedrock
-- Cilium CNI enforces CiliumNetworkPolicy — TCP POLICY_DENY means a policy is blocking traffic
-- All services run on AWS EKS with Hubble network visibility
+- Cilium CNI enforces network policy on this cluster; Hubble provides network
+  visibility; eBPF instrumentation (OBI) provides TCP/network metrics
+  independent of application code; product-svc's own OTel SDK emits spans
+  when it actually processes a request
 - Monitoring backend: {backend.upper()}
 
 {backend_context}
 
-Based on these signals, provide a root cause analysis in this exact JSON format:
+CANDIDATE CATEGORIES TO CONSIDER (not exhaustive, not ranked - weigh each
+against the evidence above before concluding):
+- Network policy blocking traffic between services
+- A datapath/protocol-level issue unrelated to policy (e.g. unsupported L3 protocol)
+- Application-level failure in gateway or product-svc itself (crash, exception, bad deploy)
+- Database (postgres) unavailability or slowness
+- Resource exhaustion (CPU/memory throttling, connection pool exhaustion)
+- DNS or service-discovery failure
+- Something not in this list, if the evidence points elsewhere
+
+Provide a root cause analysis in this exact JSON format:
 {{
   "root_cause": "one sentence describing the root cause",
   "confidence": "high|medium|low",
   "evidence": ["evidence item 1", "evidence item 2", "evidence item 3"],
+  "ruled_out": ["candidate you considered and rejected, with a one-clause reason"],
   "recommendation": "specific kubectl or operational command to fix",
   "severity": "critical|high|medium|low",
   "explanation": "2-3 sentences explaining the causal chain from root cause to symptoms",
   "backend_used": "{backend}"
 }}
+
 
 Return ONLY the JSON object, no other text."""
 
@@ -604,8 +832,16 @@ async def diagnose(
                 "cost_usd": 0.0,
             }
 
+        # Gate has determined this window is non-healthy - now do the more
+        # expensive time-series collection + change-point detection, only
+        # reached when it's actually needed.
+        findings = None
+        if backend == "dash0":
+            findings = await collect_dash0_timeseries_signals(win, service)
+            span.set_attribute("diagnose.correlated_signals", ",".join(findings.get("_correlated_signals", [])))
+
         # Build prompt and call Bedrock
-        prompt = build_prompt(signals, service, backend)
+        prompt = build_prompt(signals, service, backend, findings=findings)
         result = call_bedrock(prompt)
 
         total_ms = round((time.time() - t0) * 1000, 1)
@@ -640,6 +876,7 @@ async def diagnose(
             "window_absolute": win["anchor_epoch"] is not None,
             "service": service,
             "signals": signals,
+            "timeseries_findings": findings,
             "diagnosis": result["diagnosis"],
             "model": result["model"],
             "llm_latency_ms": result["llm_latency_ms"],
