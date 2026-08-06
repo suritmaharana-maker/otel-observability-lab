@@ -38,6 +38,24 @@ data:
                 - source_labels: [__name__]
                   regex: "hubble_.*"
                   action: keep
+
+      # Cilium's own policy-change audit trail (root-cause change events, not
+      # symptom metrics). Reads container log files via the existing hostfs
+      # mount - no new volume needed. CRI-format log lines are unwrapped by
+      # the container operator (which also recovers the REAL event
+      # timestamp), then filtered to only the policy-change lines - Cilium
+      # is otherwise very chatty and we don't want to ingest all of it.
+      filelog/cilium:
+        include:
+          - /hostfs/var/log/pods/kube-system_cilium-*/cilium-agent/*.log
+        include_file_path: true
+        start_at: end
+        operators:
+          - type: container
+            id: container-parser
+          - type: filter
+            id: policy-events-only
+            expr: 'body matches "CiliumNetworkPolicy"'
     
     processors:
       memory_limiter:
@@ -57,6 +75,14 @@ data:
             action: upsert
           - key: cloud.region
             value: "us-east-2"
+            action: upsert
+      resource/cilium_events:
+        attributes:
+          - key: service.name
+            value: "cilium-policy-events"
+            action: upsert
+          - key: deployment.environment
+            value: "lab"
             action: upsert
     
     exporters:
@@ -86,4 +112,8 @@ data:
         logs:
           receivers: [otlp]
           processors: [memory_limiter, resource, batch]
+          exporters: [otlp/dash0, debug]
+        logs/cilium_events:
+          receivers: [filelog/cilium]
+          processors: [memory_limiter, resource/cilium_events, batch]
           exporters: [otlp/dash0, debug]
