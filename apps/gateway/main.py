@@ -1,63 +1,40 @@
 """
-API Gateway - Phase 7 - MELT + LLM recommendations + AIOps diagnosis
+API Gateway - Phase 8 - network-team-only scope
 
-Phase 7 change: /diagnose now forwards the absolute time-window params
-(start, end) and the backend selector through to llm-svc, in addition to
-window and service. Previously only window+service were forwarded, so
-?start=...&end=...&backend=... were silently dropped and llm-svc fell back
-to a relative 5m window.
+No OpenTelemetry SDK instrumentation. This is deliberate: the network
+observability design this app feeds into (Hubble + OBI eBPF, /diagnose)
+is scoped to work with ZERO app-code cooperation - that's the whole
+point of a network team's tooling. SDK instrumentation now belongs to
+a separate, unrelated app-team effort, not this one. OBI's own eBPF
+traces (re-enabled in k8s/obi-values.yaml) are the only trace source
+for this system now; OBI has its own eBPF-level context propagation,
+independent of any app-level traceparent header handling, so
+cross-service request linking still works without this app doing
+anything.
 """
 import os
 import logging
 import json
 import structlog
-from opentelemetry import trace
-from opentelemetry._logs import set_logger_provider
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
-from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
-from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-from opentelemetry.propagate import set_global_textmap
-from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-OTEL_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otelcol.observability.svc.cluster.local:4317")
+class JSONFormatter(logging.Formatter):
+    def format(self, record):
+        log_data = {
+            "timestamp": self.formatTime(record, "%Y-%m-%dT%H:%M:%S.%fZ"),
+            "level": record.levelname.lower(),
+            "event": record.getMessage(),
+            "service": "gateway",
+            "logger": record.name,
+        }
+        return json.dumps(log_data)
 
-resource = Resource.create({
-    "service.name": "gateway",
-    "service.version": "0.5.0",
-    "deployment.environment": "lab",
-    "cloud.provider": "aws",
-    "cloud.region": "us-east-2",
-})
-
-provider = TracerProvider(resource=resource)
-provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=OTEL_ENDPOINT, insecure=True)))
-trace.set_tracer_provider(provider)
-set_global_textmap(TraceContextTextMapPropagator())
-
-logger_provider = LoggerProvider(resource=resource)
-logger_provider.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter(endpoint=OTEL_ENDPOINT, insecure=True)))
-set_logger_provider(logger_provider)
-otel_handler = LoggingHandler(level=logging.DEBUG, logger_provider=logger_provider)
-logging.getLogger().addHandler(otel_handler)
+stdout_handler = logging.StreamHandler()
+stdout_handler.setFormatter(JSONFormatter())
+logging.getLogger().addHandler(stdout_handler)
 logging.getLogger().setLevel(logging.INFO)
-# NOTE: LoggingInstrumentor().instrument() intentionally NOT called here.
-# It independently emits its own OTLP log record for every logger call,
-# duplicating what otel_handler (LoggingHandler) already sends - confirmed
-# in Dash0 as two entries sharing the same span/trace ID and timestamp,
-# one with 8 attributes (code.filepath/function/lineno from LoggingHandler)
-# and one with only 5 (LoggingInstrumentor's path, no code.* enrichment).
-# Trace-context correlation in stdout logs is already handled manually by
-# OTelJSONFormatter below, so LoggingInstrumentor added nothing but the
-# duplicate.
 
 structlog.configure(
     processors=[
@@ -75,29 +52,7 @@ structlog.configure(
     logger_factory=structlog.stdlib.LoggerFactory(),
 )
 
-class OTelJSONFormatter(logging.Formatter):
-    def format(self, record):
-        current_span = trace.get_current_span()
-        ctx = current_span.get_span_context()
-        log_data = {
-            "timestamp": self.formatTime(record, "%Y-%m-%dT%H:%M:%S.%fZ"),
-            "level": record.levelname.lower(),
-            "event": record.getMessage(),
-            "service": "gateway",
-            "logger": record.name,
-        }
-        if ctx.is_valid:
-            log_data["trace_id"] = format(ctx.trace_id, "032x")
-            log_data["span_id"] = format(ctx.span_id, "016x")
-        return json.dumps(log_data)
-
-stdout_handler = logging.StreamHandler()
-stdout_handler.setFormatter(OTelJSONFormatter())
-logging.getLogger().addHandler(stdout_handler)
-
-HTTPXClientInstrumentor().instrument()
 app = FastAPI(title="OTel Lab - API Gateway", version="0.5.0")
-FastAPIInstrumentor.instrument_app(app, exclude_spans=["send", "receive"])
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],

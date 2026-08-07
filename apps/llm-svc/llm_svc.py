@@ -15,13 +15,6 @@ from datetime import datetime, timezone
 import boto3
 import httpx
 from fastapi import FastAPI, HTTPException
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 log = logging.getLogger("llm-svc")
 logging.basicConfig(level=logging.INFO)
@@ -34,18 +27,13 @@ DT_API_TOKEN    = os.getenv("DT_API_TOKEN", "")
 BEDROCK_MODEL   = os.getenv("BEDROCK_MODEL_ID", "us.amazon.nova-micro-v1:0")
 BEDROCK_REGION  = os.getenv("AWS_DEFAULT_REGION", "us-east-2")
 
-resource = Resource.create({
-    "service.name": "llm-svc",
-    "service.version": "0.7.0",
-    "deployment.environment": "lab",
-})
-provider = TracerProvider(resource=resource)
-provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=OTEL_ENDPOINT, insecure=True)))
-trace.set_tracer_provider(provider)
-tracer = trace.get_tracer("llm-svc")
-HTTPXClientInstrumentor().instrument()
+# No OpenTelemetry SDK instrumentation for llm-svc's own HTTP/FastAPI layer.
+# Network-team-only scope: this service's own self-tracing was never the
+# point, and OBI's eBPF traces now cover it without any code here. All of
+# llm-svc's actual RCA logic below (signal collection, change-point
+# detection, Bedrock calls) is completely independent of this and is
+# untouched.
 app = FastAPI(title="OTel Lab — LLM Service", version="0.7.0")
-FastAPIInstrumentor.instrument_app(app)
 
 PRODUCT_SVC_URL = os.getenv("PRODUCT_SVC_URL", "http://product-svc:8001")
 bedrock = boto3.client("bedrock-runtime", region_name=BEDROCK_REGION)
@@ -286,8 +274,15 @@ async def collect_dash0_timeseries_signals(win: dict, service: str) -> dict:
             f'sum(increase(obi_stat_tcp_failed_connections{{k8s_src_owner_name="{service}"}}[30s]))'
         ),
         "product_svc_spans": (
+            # telemetry_distro_name, not telemetry_sdk_name: confirmed live
+            # that OBI's own eBPF spans ALSO report telemetry_sdk_name=
+            # "opentelemetry" (mimicking the standard SDK's naming), so that
+            # field never actually distinguished OBI from app-SDK spans -
+            # it happened to work only because both existed simultaneously
+            # before SDK removal. telemetry_distro_name=
+            # "opentelemetry-ebpf-instrumentation" is OBI-specific.
             'sum(increase(dash0_spans_total{service_name="product-svc",'
-            'telemetry_sdk_name="opentelemetry"}[30s]))'
+            'telemetry_distro_name="opentelemetry-ebpf-instrumentation"}[30s]))'
         ),
         "http_5xx_count": (
             'sum(increase(http_server_request_duration_seconds_count'
@@ -390,9 +385,15 @@ async def collect_dash0_signals(win: dict, service: str) -> dict:
     )
     signals["obi_tcp_failed_connections"] = round(float(obi_tcp_failed[0]["value"][1]), 2) if obi_tcp_failed else 0.0
 
-    # AppO11y — product-svc spans (drops to zero during fault)
+    # AppO11y — product-svc spans (drops to zero during fault). Sourced from
+    # OBI's own eBPF traces now (telemetry_distro_name, not telemetry_sdk_name
+    # - the latter never actually distinguished OBI spans from app-SDK ones,
+    # see collect_dash0_timeseries_signals for detail). Also fixes a stale
+    # metric name (dash0_spans -> dash0_spans_total, confirmed empirically
+    # earlier this session that the former doesn't exist).
     spans = await query_dash0(
-        'sum(increase(dash0_spans{service_name="product-svc",telemetry_sdk_name="opentelemetry"}[RANGE][RANGE_END]))',
+        'sum(increase(dash0_spans_total{service_name="product-svc",'
+        'telemetry_distro_name="opentelemetry-ebpf-instrumentation"}[RANGE][RANGE_END]))',
         win,
     )
     signals["product_svc_spans"] = round(float(spans[0]["value"][1]), 2) if spans else 0.0
@@ -716,58 +717,55 @@ async def health():
 
 @app.get("/recommendations")
 async def recommendations(query: str = "best product for developers"):
-    with tracer.start_as_current_span("llm.recommendations") as span:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(f"{PRODUCT_SVC_URL}/products", timeout=10.0)
-            products = r.json()
+    async with httpx.AsyncClient() as client:
+        r = await client.get(f"{PRODUCT_SVC_URL}/products", timeout=10.0)
+        products = r.json()
 
-        span.set_attribute("products.count", len(products))
-        product_list = "\n".join(
-            [f"- {p['name']} (${p['price']}): {p['description']}" for p in products]
-        )
-        prompt = f"""You are a product recommendation engine.
+    log.info(f"recommendations_products_count count={len(products)}")
+    product_list = "\n".join(
+        [f"- {p['name']} (${p['price']}): {p['description']}" for p in products]
+    )
+    prompt = f"""You are a product recommendation engine.
 Customer query: {query}
 Available products:
 {product_list}
 Recommend the best product and explain why in 2-3 sentences."""
 
-        t0 = time.time()
-        resp = bedrock.converse(
-            modelId=BEDROCK_MODEL,
-            messages=[{"role": "user", "content": [{"text": prompt}]}],
-            inferenceConfig={"maxTokens": 512, "temperature": 0.3},
-        )
-        latency_ms = round((time.time() - t0) * 1000, 1)
-        usage = resp.get("usage", {})
-        recommendation_text = resp["output"]["message"]["content"][0]["text"]
-        cost_usd = round(
-            usage.get("inputTokens", 0) * 0.000000035
-            + usage.get("outputTokens", 0) * 0.000000140, 8
-        )
+    t0 = time.time()
+    resp = bedrock.converse(
+        modelId=BEDROCK_MODEL,
+        messages=[{"role": "user", "content": [{"text": prompt}]}],
+        inferenceConfig={"maxTokens": 512, "temperature": 0.3},
+    )
+    latency_ms = round((time.time() - t0) * 1000, 1)
+    usage = resp.get("usage", {})
+    recommendation_text = resp["output"]["message"]["content"][0]["text"]
+    cost_usd = round(
+        usage.get("inputTokens", 0) * 0.000000035
+        + usage.get("outputTokens", 0) * 0.000000140, 8
+    )
 
-        span.set_attribute("gen_ai.system", "aws.bedrock")
-        span.set_attribute("gen_ai.operation.name", "chat")
-        span.set_attribute("gen_ai.request.model", BEDROCK_MODEL)
-        span.set_attribute("gen_ai.request.temperature", 0.3)
-        span.set_attribute("gen_ai.usage.input_tokens", usage.get("inputTokens", 0))
-        span.set_attribute("gen_ai.usage.output_tokens", usage.get("outputTokens", 0))
-        span.set_attribute("llm.latency_ms", latency_ms)
-        span.set_attribute("llm.cost_usd", cost_usd)
+    log.info(
+        f"recommendations_complete model={BEDROCK_MODEL} "
+        f"input_tokens={usage.get('inputTokens', 0)} "
+        f"output_tokens={usage.get('outputTokens', 0)} "
+        f"latency_ms={latency_ms} cost_usd={cost_usd}"
+    )
 
-        return {
-            "query": query,
-            "recommendation": recommendation_text,
-            "model": BEDROCK_MODEL,
-            "temperature": 0.3,
-            "tokens": {
-                "input": usage.get("inputTokens", 0),
-                "output": usage.get("outputTokens", 0),
-                "total": usage.get("totalTokens", 0),
-            },
-            "cost_usd": cost_usd,
-            "llm_latency_ms": latency_ms,
-            "products_considered": len(products),
-        }
+    return {
+        "query": query,
+        "recommendation": recommendation_text,
+        "model": BEDROCK_MODEL,
+        "temperature": 0.3,
+        "tokens": {
+            "input": usage.get("inputTokens", 0),
+            "output": usage.get("outputTokens", 0),
+            "total": usage.get("totalTokens", 0),
+        },
+        "cost_usd": cost_usd,
+        "llm_latency_ms": latency_ms,
+        "products_considered": len(products),
+    }
 
 
 @app.get("/diagnose")
@@ -787,100 +785,35 @@ async def diagnose(
     ?window=5m                              → relative, last 5 minutes (default)
     ?start=2026-06-22T17:56:52Z&end=...Z    → absolute window (exact incident span)
     """
-    with tracer.start_as_current_span("diagnose.rca") as span:
-        # Resolve the window first so failures here return 400, not 500
-        win = resolve_window(window, start, end)
+    # Resolve the window first so failures here return 400, not 500
+    win = resolve_window(window, start, end)
 
-        span.set_attribute("diagnose.backend", backend)
-        span.set_attribute("diagnose.window", win["label"])
-        span.set_attribute("diagnose.window_range", win["range"])
-        span.set_attribute("diagnose.window_absolute", win["anchor_epoch"] is not None)
-        span.set_attribute("diagnose.service", service)
+    t0 = time.time()
 
-        t0 = time.time()
+    # Collect signals from selected backend
+    if backend == "dynatrace":
+        if not DT_API_TOKEN:
+            raise HTTPException(status_code=400, detail="DT_API_TOKEN not configured")
+        signals = await collect_dynatrace_signals(win, service)
+    elif backend == "dash0":
+        if not DASH0_AUTH_TOKEN:
+            raise HTTPException(status_code=400, detail="DASH0_AUTH_TOKEN not configured")
+        signals = await collect_dash0_signals(win, service)
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown backend: {backend}. Use dash0 or dynatrace")
 
-        # Collect signals from selected backend
-        if backend == "dynatrace":
-            if not DT_API_TOKEN:
-                raise HTTPException(status_code=400, detail="DT_API_TOKEN not configured")
-            signals = await collect_dynatrace_signals(win, service)
-        elif backend == "dash0":
-            if not DASH0_AUTH_TOKEN:
-                raise HTTPException(status_code=400, detail="DASH0_AUTH_TOKEN not configured")
-            signals = await collect_dash0_signals(win, service)
-        else:
-            raise HTTPException(status_code=400, detail=f"Unknown backend: {backend}. Use dash0 or dynatrace")
-
-        # Deterministic healthy-path gate: if no fault fingerprints are present,
-        # return a 'no anomaly' result without spending an LLM call (Phase 7).
-        healthy = healthy_path_check(signals, backend)
-        if healthy is not None:
-            total_ms = round((time.time() - t0) * 1000, 1)
-            span.set_attribute("diagnose.root_cause", healthy["root_cause"])
-            span.set_attribute("diagnose.confidence", healthy["confidence"])
-            span.set_attribute("diagnose.severity", healthy["severity"])
-            span.set_attribute("diagnose.total_ms", total_ms)
-            span.set_attribute("diagnose.healthy_path", True)
-            if backend == "dash0":
-                span.set_attribute("diagnose.hubble_drop_total_policy_deny", signals.get("hubble_drop_total_policy_deny", 0))
-                span.set_attribute("diagnose.obi_tcp_failed_connections", signals.get("obi_tcp_failed_connections", 0))
-                span.set_attribute("diagnose.product_svc_spans", signals.get("product_svc_spans", 0))
-            log.info(
-                f"diagnose_complete backend={backend} window={win['label']} "
-                f"root_cause={healthy['root_cause']} healthy_path=true total_ms={total_ms}"
-            )
-            return {
-                "backend": backend,
-                "window": win["label"],
-                "window_range": win["range"],
-                "window_absolute": win["anchor_epoch"] is not None,
-                "service": service,
-                "signals": signals,
-                "diagnosis": healthy,
-                "model": "none (deterministic healthy-path)",
-                "llm_latency_ms": 0.0,
-                "total_ms": total_ms,
-                "tokens": {"input": 0, "output": 0},
-                "cost_usd": 0.0,
-            }
-
-        # Gate has determined this window is non-healthy - now do the more
-        # expensive time-series collection + change-point detection, only
-        # reached when it's actually needed.
-        findings = None
-        if backend == "dash0":
-            findings = await collect_dash0_timeseries_signals(win, service)
-            span.set_attribute("diagnose.correlated_signals", ",".join(findings.get("_correlated_signals", [])))
-
-        # Build prompt and call Bedrock
-        prompt = build_prompt(signals, service, backend, findings=findings)
-        result = call_bedrock(prompt)
-
+    # Deterministic healthy-path gate: if no fault fingerprints are present,
+    # return a 'no anomaly' result without spending an LLM call (Phase 7).
+    healthy = healthy_path_check(signals, backend)
+    if healthy is not None:
         total_ms = round((time.time() - t0) * 1000, 1)
-
-        # OTel attributes
-        span.set_attribute("diagnose.root_cause", result["diagnosis"].get("root_cause", ""))
-        span.set_attribute("diagnose.confidence", result["diagnosis"].get("confidence", ""))
-        span.set_attribute("diagnose.severity", result["diagnosis"].get("severity", ""))
-        span.set_attribute("diagnose.total_ms", total_ms)
-
-        if backend == "dash0":
-            span.set_attribute("diagnose.hubble_drop_total_policy_deny", signals.get("hubble_drop_total_policy_deny", 0))
-            span.set_attribute("diagnose.http_error_rate_pct", signals.get("http_error_rate_pct", 0))
-            span.set_attribute("diagnose.obi_network_flow_bytes", signals.get("obi_network_flow_bytes", 0))
-            span.set_attribute("diagnose.obi_tcp_failed_connections", signals.get("obi_tcp_failed_connections", 0))
-            span.set_attribute("diagnose.product_svc_spans", signals.get("product_svc_spans", 0))
-        elif backend == "dynatrace":
-            span.set_attribute("diagnose.davis_active_problems", signals.get("davis_active_problems", 0))
-            span.set_attribute("diagnose.davis_severity", signals.get("davis_severity", "") or "")
-
         log.info(
             f"diagnose_complete backend={backend} window={win['label']} "
-            f"root_cause={result['diagnosis'].get('root_cause','')} "
-            f"confidence={result['diagnosis'].get('confidence','')} "
-            f"total_ms={total_ms}"
+            f"root_cause={healthy['root_cause']} healthy_path=true total_ms={total_ms} "
+            f"hubble_drop_total_policy_deny={signals.get('hubble_drop_total_policy_deny', 0)} "
+            f"obi_tcp_failed_connections={signals.get('obi_tcp_failed_connections', 0)} "
+            f"product_svc_spans={signals.get('product_svc_spans', 0)}"
         )
-
         return {
             "backend": backend,
             "window": win["label"],
@@ -888,11 +821,61 @@ async def diagnose(
             "window_absolute": win["anchor_epoch"] is not None,
             "service": service,
             "signals": signals,
-            "timeseries_findings": findings,
-            "diagnosis": result["diagnosis"],
-            "model": result["model"],
-            "llm_latency_ms": result["llm_latency_ms"],
+            "diagnosis": healthy,
+            "model": "none (deterministic healthy-path)",
+            "llm_latency_ms": 0.0,
             "total_ms": total_ms,
-            "tokens": result["tokens"],
-            "cost_usd": result["cost_usd"],
+            "tokens": {"input": 0, "output": 0},
+            "cost_usd": 0.0,
         }
+
+    # Gate has determined this window is non-healthy - now do the more
+    # expensive time-series collection + change-point detection, only
+    # reached when it's actually needed.
+    findings = None
+    if backend == "dash0":
+        findings = await collect_dash0_timeseries_signals(win, service)
+        log.info(f"diagnose_correlated_signals signals={','.join(findings.get('_correlated_signals', []))}")
+
+    # Build prompt and call Bedrock
+    prompt = build_prompt(signals, service, backend, findings=findings)
+    result = call_bedrock(prompt)
+
+    total_ms = round((time.time() - t0) * 1000, 1)
+
+    if backend == "dash0":
+        log.info(
+            f"diagnose_signals hubble_drop_total_policy_deny={signals.get('hubble_drop_total_policy_deny', 0)} "
+            f"http_error_rate_pct={signals.get('http_error_rate_pct', 0)} "
+            f"obi_network_flow_bytes={signals.get('obi_network_flow_bytes', 0)} "
+            f"obi_tcp_failed_connections={signals.get('obi_tcp_failed_connections', 0)} "
+            f"product_svc_spans={signals.get('product_svc_spans', 0)}"
+        )
+    elif backend == "dynatrace":
+        log.info(
+            f"diagnose_signals davis_active_problems={signals.get('davis_active_problems', 0)} "
+            f"davis_severity={signals.get('davis_severity', '') or ''}"
+        )
+
+    log.info(
+        f"diagnose_complete backend={backend} window={win['label']} "
+        f"root_cause={result['diagnosis'].get('root_cause','')} "
+        f"confidence={result['diagnosis'].get('confidence','')} "
+        f"total_ms={total_ms}"
+    )
+
+    return {
+        "backend": backend,
+        "window": win["label"],
+        "window_range": win["range"],
+        "window_absolute": win["anchor_epoch"] is not None,
+        "service": service,
+        "signals": signals,
+        "timeseries_findings": findings,
+        "diagnosis": result["diagnosis"],
+        "model": result["model"],
+        "llm_latency_ms": result["llm_latency_ms"],
+        "total_ms": total_ms,
+        "tokens": result["tokens"],
+        "cost_usd": result["cost_usd"],
+    }

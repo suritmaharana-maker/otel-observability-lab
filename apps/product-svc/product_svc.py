@@ -1,41 +1,19 @@
 """
-Product Service - Phase 2 - OTel SDK instrumented
+Product Service - Phase 8 - network-team-only scope
+
+No OpenTelemetry SDK instrumentation. See apps/gateway/main.py for the
+full rationale: this system is scoped to network-team observability
+with zero app-code cooperation, so app-level SDK tracing is deliberately
+out of scope here. OBI's own eBPF traces are the sole trace source.
 """
 import os
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
-from opentelemetry.propagate import set_global_textmap
-from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
-
 import psycopg2
 import psycopg2.extras
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 
-OTEL_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otelcol.observability.svc.cluster.local:4317")
-
-resource = Resource.create({
-    "service.name": "product-svc",
-    "service.version": "0.2.0",
-    "deployment.environment": "lab",
-    "cloud.provider": "aws",
-    "cloud.region": "us-east-2",
-})
-
-provider = TracerProvider(resource=resource)
-provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=OTEL_ENDPOINT, insecure=True)))
-trace.set_tracer_provider(provider)
-set_global_textmap(TraceContextTextMapPropagator())
-Psycopg2Instrumentor().instrument()
-
 app = FastAPI(title="OTel Lab - Product Service", version="0.2.0")
-FastAPIInstrumentor.instrument_app(app, exclude_spans=["send", "receive"])
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://otellab:otellab@postgres:5432/otellab")
 
@@ -88,11 +66,8 @@ async def list_products():
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
         query = "SELECT id, name, description, price, category FROM products ORDER BY id"
-        with trace.get_tracer("product-svc").start_as_current_span("SELECT products") as span:
-            span.set_attribute("db.system", "postgresql")
-            span.set_attribute("db.statement", query)
-            cur.execute(query)
-            products = cur.fetchall()
+        cur.execute(query)
+        products = cur.fetchall()
         return [dict(p) for p in products]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

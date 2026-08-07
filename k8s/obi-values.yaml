@@ -50,6 +50,17 @@ config:
       protocol: grpc
       interval: 15s
 
+    # Re-enabled: with SDK instrumentation being fully removed from the
+    # apps (network-team-only scope, no app-code cooperation), OBI's own
+    # eBPF traces become the ONLY trace source available. OBI has its own
+    # eBPF-level context propagation (ebpf.enable_context_propagation),
+    # independent of any app-level traceparent header handling, so
+    # cross-service linking (gateway->product-svc) should still work
+    # without any app cooperation.
+    otel_traces_export:
+      endpoint: "http://otelcol.observability.svc.cluster.local:4317"
+      protocol: grpc
+
     attributes:
       kubernetes:
         enable: true
