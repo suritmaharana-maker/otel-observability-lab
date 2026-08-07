@@ -135,6 +135,62 @@ async def query_dash0(metric_expr: str, win: dict) -> list:
     return []
 
 
+async def validate_topology_edge(source: str, destination: str) -> bool:
+    """Check whether source->destination is a genuine, currently-known edge
+    in the topology, before spending any further effort on a diagnosis.
+
+    Without this, a typo'd or fabricated source/destination pair would
+    silently produce empty-data PromQL results throughout the whole
+    pipeline, which healthy_path_check would then read as "no anomaly" -
+    a confidently wrong answer for "this pair doesn't exist" rather than
+    an honest rejection. This closes that gap.
+
+    Uses the SAME query as the topology-discovery recording rule
+    (k8s/topology-recording-rule.yaml: 2h rolling window of real
+    obi_network_flow_bytes traffic), run live rather than through the
+    precomputed metric. The recording rule itself is registered and
+    enabled in Dash0 but has never actually evaluated (confirmed:
+    first-evaluation-at is empty despite ~2h of registration on a 10m
+    interval) - an apparent platform-side issue, not a config problem on
+    our end (the identical query run directly returns real data, 75
+    edges, confirmed live). Logged as a separate open item. This
+    live-query fallback is fully correct today; it just can't benefit
+    from the "precomputed once, queried cheaply many times" optimization
+    the recording rule was meant to provide.
+
+    Fails OPEN on a query/network error (a transient Dash0 hiccup
+    shouldn't block a legitimate diagnosis) but fails CLOSED - genuinely
+    rejects - when the query succeeds cleanly and simply finds no
+    traffic for this pair, which is the real "this edge doesn't exist"
+    case this function exists to catch.
+    """
+    now = time.time()
+    q = (
+        f'sum(rate(obi_network_flow_bytes{{k8s_src_owner_name="{source}",'
+        f'k8s_dst_owner_name="{destination}"}}[2h]))'
+    )
+    url = f"{DASH0_PROM_URL}/api/v1/query"
+    headers = {"Authorization": f"Bearer {DASH0_AUTH_TOKEN}"}
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                url, headers=headers,
+                params={"query": q, "time": f"{now:.3f}"},
+                timeout=15.0,
+            )
+            if r.status_code != 200:
+                log.warning("topology_validation_query_failed", extra={"status": r.status_code})
+                return True  # fail open on a query error
+            result = r.json().get("data", {}).get("result", [])
+            if not result:
+                return False
+            val = float(result[0]["value"][1])
+            return val > 0
+    except Exception as e:
+        log.warning("topology_validation_error", extra={"error": str(e)})
+        return True  # fail open on a query error
+
+
 async def query_dash0_range(metric_expr: str, win: dict, step: str = "15s") -> list:
     """Query Dash0's Prometheus range-query API, returning a genuine time
     series (not a single scalar). `metric_expr` should be a complete PromQL
@@ -811,6 +867,25 @@ async def diagnose(
     """
     # Resolve the window first so failures here return 400, not 500
     win = resolve_window(start, end)
+
+    # Topology validation: reject a source/destination pair that has no
+    # real, recent traffic between them, rather than silently running the
+    # full pipeline on empty data and confidently returning "no anomaly"
+    # for what might just be a typo. Only meaningful for dash0 (the check
+    # itself queries obi_network_flow_bytes).
+    if backend == "dash0":
+        edge_exists = await validate_topology_edge(source, destination)
+        if not edge_exists:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"No known traffic between source='{source}' and "
+                    f"destination='{destination}' in the last 2h. This pair "
+                    f"may not be a real edge in the topology, or the names "
+                    f"may be misspelled - check exact k8s owner names "
+                    f"(e.g. Deployment name), not pod names."
+                ),
+            )
 
     t0 = time.time()
 

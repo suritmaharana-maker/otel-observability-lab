@@ -127,3 +127,48 @@ used successfully in /diagnose testing).
 3. Find cilium-agent's actual metrics port/config if native metrics
    are enabled at all, to get an independent counter to compare
    against Hubble's flow-log-derived one.
+
+
+---
+
+## OPEN ISSUE: Dash0 recording rule never evaluates despite being enabled
+
+Status: unresolved, worked around (live query instead of precomputed).
+Date found: 2026-08-07
+
+### What's confirmed
+- topology-discovery recording rule (k8s/topology-recording-rule.yaml,
+  record=topology:edge_bytes:sum_rate2h) has been registered and
+  enabled=true in Dash0 for ~2 hours, with a 10m evaluation interval -
+  should have evaluated roughly 10+ times by now.
+- GET /api/recording-rules shows dash0.com/first-evaluation-at is
+  EMPTY for this rule - it has never actually run.
+- Querying topology:edge_bytes:sum_rate2h directly returns zero
+  results (confirms it's never populated any data).
+- The underlying data source is fully healthy: obi_network_flow_bytes
+  itself returns real data when queried directly.
+- The EXACT SAME PromQL expression the recording rule uses, run as a
+  plain instant query (not through the recording-rule mechanism),
+  returns 75 real topology edges immediately. This rules out the
+  query itself being wrong - it's specifically the recording rule's
+  scheduling/execution that isn't running, an apparent platform-side
+  issue on Dash0's end, not a config problem on ours.
+
+### Workaround in place
+apps/llm-svc/llm_svc.py's validate_topology_edge() runs the identical
+query live, per-request, instead of reading the precomputed metric.
+This is fully correct today - just forfeits the "computed once every
+10 minutes, queried cheaply many times" efficiency the recording rule
+was meant to provide. Given /diagnose already runs several other
+per-request PromQL queries, this added cost is likely negligible in
+practice, but worth revisiting if request volume grows.
+
+### Not yet checked
+- Whether other recording rules (if any get created later) have the
+  same never-evaluates behavior, which would confirm this is a
+  systemic Dash0 platform issue rather than something specific to
+  this one rule.
+- Dash0 support/docs for any known issue matching this symptom.
+- Whether deleting and recreating the rule (as was needed once before,
+  for the interval-too-short error) resolves it - not attempted this
+  time since the live-query workaround unblocked the actual feature.
