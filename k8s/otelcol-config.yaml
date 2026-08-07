@@ -45,6 +45,17 @@ data:
       # the container operator (which also recovers the REAL event
       # timestamp), then filtered to only the policy-change lines - Cilium
       # is otherwise very chatty and we don't want to ingest all of it.
+      #
+      # IMPORTANT: stanza's filter operator DROPS entries that MATCH the
+      # expression (confirmed against the official docs) - the opposite of
+      # what the expression below looks like it does at a glance. To KEEP
+      # only policy-change lines, we must match (and drop) everything that
+      # is NOT a policy-change line. Found and fixed after the original
+      # (non-negated) expression was silently doing the reverse of what was
+      # intended for this pipeline's entire lifetime - verified via a real
+      # query showing unrelated cilium-agent chatter (e.g. "Reloaded
+      # endpoint BPF program") tagged as cilium-policy-events, with zero
+      # actual "Imported/Deleted CiliumNetworkPolicy" lines present.
       filelog/cilium:
         include:
           - /hostfs/var/log/pods/kube-system_cilium-*/cilium-agent/*.log
@@ -55,7 +66,7 @@ data:
             id: container-parser
           - type: filter
             id: policy-events-only
-            expr: 'body matches "CiliumNetworkPolicy"'
+            expr: 'not (body matches "CiliumNetworkPolicy")'
     
     processors:
       memory_limiter:
