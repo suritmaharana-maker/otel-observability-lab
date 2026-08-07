@@ -10,7 +10,7 @@ Phase 7 changes:
   obi.stat.tcp.failed.connections, dash0.spans (product-svc).
 - Prompt reframed to walk the proven causal chain across all signals.
 """
-import os, json, logging, asyncio, time, statistics
+import os, json, logging, asyncio, time, statistics, re
 from datetime import datetime, timezone
 import boto3
 import httpx
@@ -22,6 +22,7 @@ logging.basicConfig(level=logging.INFO)
 OTEL_ENDPOINT   = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otelcol.observability.svc.cluster.local:4317")
 DASH0_AUTH_TOKEN = os.getenv("DASH0_AUTH_TOKEN", "")
 DASH0_PROM_URL  = os.getenv("DASH0_PROMETHEUS_URL", "https://api.us-west-2.aws.dash0.com/api/prometheus")
+DASH0_API_URL   = os.getenv("DASH0_API_URL", "https://api.us-west-2.aws.dash0.com")
 DT_ENV_ID       = os.getenv("DT_ENVIRONMENT_ID", "yta61562")
 DT_API_TOKEN    = os.getenv("DT_API_TOKEN", "")
 BEDROCK_MODEL   = os.getenv("BEDROCK_MODEL_ID", "us.amazon.nova-micro-v1:0")
@@ -189,6 +190,82 @@ async def validate_topology_edge(source: str, destination: str) -> bool:
     except Exception as e:
         log.warning("topology_validation_error", extra={"error": str(e)})
         return True  # fail open on a query error
+
+
+DASH0_API_URL = DASH0_PROM_URL.replace("/api/prometheus", "")
+
+
+async def query_cilium_policy_logs(win: dict, limit: int = 20) -> list[dict]:
+    """Query REAL Cilium policy-change log CONTENT for the incident window -
+    the actual audit-trail text ('Imported CiliumNetworkPolicy
+    ciliumNetworkPolicyName=... k8sNamespace=...'), not the
+    cilium_policy_change_event metric-count proxy this system relied on
+    before.
+
+    Uses Dash0's own CLI (embedded in this image - see Dockerfile) via
+    subprocess rather than a hand-rolled HTTP call: the logs-query REST
+    endpoint is undocumented and marked experimental by Dash0 itself, and
+    five different body-schema guesses against it directly all failed with
+    the same opaque error. The CLI is the officially-supported way to hit
+    this endpoint and handles whatever the real schema is internally - the
+    CLI's own binary (ghcr.io/dash0hq/cli) is built FROM scratch with no CA
+    cert bundle, so it's extracted into this image (which has a real cert
+    store already) rather than run standalone.
+
+    Returns a list of {time_unix_ns, body} dicts, chronologically sorted,
+    deduplicated by exact body text (the same cluster-wide policy change
+    produces one near-identical log line per cilium-agent replica - 3
+    replicas, 3 near-simultaneous copies of the same event - which isn't
+    useful noise to hand the LLM 3 times over).
+    """
+    end_epoch = win.get("anchor_epoch") or time.time()
+    range_s = int(win["range"].rstrip("s")) if win["range"].endswith("s") else 300
+    start_epoch = end_epoch - range_s
+    from_str = datetime.fromtimestamp(start_epoch, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    to_str = datetime.fromtimestamp(end_epoch, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    env = {
+        **os.environ,
+        "DASH0_API_URL": DASH0_API_URL,
+        "DASH0_AUTH_TOKEN": DASH0_AUTH_TOKEN,
+    }
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "dash0", "-X", "logs", "query",
+            "--filter", "service.name is cilium-policy-events",
+            "--from", from_str,
+            "--to", to_str,
+            "--limit", str(limit),
+            "-o", "json",
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15.0)
+        if proc.returncode != 0:
+            log.warning("cilium_log_query_failed", extra={"stderr": stderr.decode(errors="replace")[:500]})
+            return []
+        data = json.loads(stdout)
+    except Exception as e:
+        log.warning("cilium_log_query_error", extra={"error": str(e)})
+        return []
+
+    records = []
+    seen_bodies = set()
+    for rl in data.get("resourceLogs", []):
+        for sl in rl.get("scopeLogs", []):
+            for lr in sl.get("logRecords", []):
+                body = lr.get("body", {}).get("stringValue", "")
+                if not body or body in seen_bodies:
+                    continue
+                seen_bodies.add(body)
+                try:
+                    time_ns = int(lr.get("timeUnixNano", "0"))
+                except ValueError:
+                    time_ns = 0
+                records.append({"time_unix_ns": time_ns, "body": body})
+    records.sort(key=lambda r: r["time_unix_ns"])
+    return records
 
 
 async def query_dash0_range(metric_expr: str, win: dict, step: str = "15s") -> list:
@@ -603,7 +680,7 @@ def _format_finding(name: str, f: dict) -> str:
     )
 
 
-def build_prompt(signals: dict, source: str, destination: str, backend: str, findings: dict | None = None) -> str:
+def build_prompt(signals: dict, source: str, destination: str, backend: str, findings: dict | None = None, policy_logs: list | None = None) -> str:
     backend_context = ""
 
     if backend == "dash0" and findings:
@@ -633,6 +710,26 @@ def build_prompt(signals: dict, source: str, destination: str, backend: str, fin
             f"- {name}: {desc}" for name, desc in EXPECTED_DIRECTION_IF_POLICY_BLOCK.items()
         )
 
+        if policy_logs:
+            log_lines = "\n".join(f"- {r['body']}" for r in policy_logs)
+            policy_log_section = f"""
+ACTUAL CHANGE-RECORD LOG CONTENT (not a count, the real audit-trail text,
+queried directly from Cilium's own logs for this window):
+{log_lines}
+
+This is the strongest possible evidence available to this system: the literal
+record of what changed, when, and to which object. If a root cause is
+supported by one of these lines, cite the SPECIFIC policy name and action
+(Imported/Deleted) from the text above, not just "a policy changed."
+"""
+        else:
+            policy_log_section = (
+                "\nNo Cilium policy-change log entries found in this window - "
+                "if hubble_drop_policy_deny or obi_tcp_failed_connections shifted "
+                "anyway, the cause is NOT a policy being applied/removed during "
+                "this window (rule out that specific hypothesis explicitly).\n"
+            )
+
         backend_context = f"""
 TIME-SERIES CHANGE-POINT ANALYSIS ({findings.get('window','last 5m')}):
 Each signal below was analyzed as a real time series (not a single aggregated
@@ -647,7 +744,7 @@ to something happening; this one IS the something. If its change point lines
 up with the symptom signals, that's actual causal evidence, not inference
 from correlated symptoms - prefer it over any conclusion built only from
 symptoms shifting together.
-
+{policy_log_section}
 {chr(10).join(lines)}
 
 {correlation_note}
@@ -975,12 +1072,15 @@ async def diagnose(
     # expensive time-series collection + change-point detection, only
     # reached when it's actually needed.
     findings = None
+    policy_logs = []
     if backend == "dash0":
         findings = await collect_dash0_timeseries_signals(win, source, destination)
         log.info(f"diagnose_correlated_signals signals={','.join(findings.get('_correlated_signals', []))}")
+        policy_logs = await query_cilium_policy_logs(win)
+        log.info(f"diagnose_policy_logs count={len(policy_logs)}")
 
     # Build prompt and call Bedrock
-    prompt = build_prompt(signals, source, destination, backend, findings=findings)
+    prompt = build_prompt(signals, source, destination, backend, findings=findings, policy_logs=policy_logs)
     result = call_bedrock(prompt)
 
     total_ms = round((time.time() - t0) * 1000, 1)
@@ -1015,6 +1115,7 @@ async def diagnose(
         "destination": destination,
         "signals": signals,
         "timeseries_findings": findings,
+        "policy_change_logs": policy_logs,
         "diagnosis": result["diagnosis"],
         "model": result["model"],
         "llm_latency_ms": result["llm_latency_ms"],
