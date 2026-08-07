@@ -118,22 +118,18 @@ async def get_recommendations(query: str = "best product for developers"):
 
 @app.get("/diagnose")
 async def diagnose(
-    window: str = "5m",
-    start: str | None = None,
+    start: str,
+    source: str,
+    destination: str,
     end: str | None = None,
-    service: str = "gateway",
     backend: str = "dash0",
 ):
     logger.info(
-        f"diagnose_request window={window} start={start} end={end} "
-        f"service={service} backend={backend}"
+        f"diagnose_request start={start} end={end} "
+        f"source={source} destination={destination} backend={backend}"
     )
-    # Forward window+service+backend always; forward start/end only when both
-    # are supplied, so we never pass empty strings that llm-svc would treat as
-    # a (zero-length, invalid) absolute window.
-    params = {"window": window, "service": service, "backend": backend}
-    if start and end:
-        params["start"] = start
+    params = {"start": start, "source": source, "destination": destination, "backend": backend}
+    if end:
         params["end"] = end
 
     async with httpx.AsyncClient() as client:

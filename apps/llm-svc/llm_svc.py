@@ -55,34 +55,46 @@ def _parse_rfc3339(ts: str) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
-def resolve_window(window: str, start: str | None, end: str | None) -> dict:
-    """Resolve the query window into the fields the collectors need.
+def resolve_window(start: str | None, end: str | None) -> dict:
+    """Resolve the query window. `start` is REQUIRED - there is no
+    relative-duration fallback anymore.
 
-    Two modes:
-      - Absolute: both `start` and `end` supplied (RFC3339). Range duration is
-        the exact span end-start (whole seconds), and `anchor_epoch` pins PromQL
-        evaluation to `end` via the @ modifier.
-      - Relative (fallback): no start/end. Behaves exactly like Phase 6 —
-        range duration is `window`, evaluated at "now" (no anchor).
+    This is deliberate, not an oversight: the input-contract design
+    established this session is that a diagnosis without a real incident
+    start time is a guess, not a finding - "prescriptive, not a shot in
+    the dark." A caller (APM) that can't supply a real start shouldn't
+    get a confident-looking answer built from an arbitrary relative
+    window like the old default "last 5m".
 
-    Returns dict: {range: "<dur>", anchor_epoch: <float|None>, label: "<human>"}
+    `end` is optional and defaults to now - this is what lets a caller
+    diagnose an incident that's STILL ONGOING, rather than being forced
+    to supply an artificial end time before the incident has resolved.
     """
-    if start and end:
-        t_start = _parse_rfc3339(start)
-        t_end = _parse_rfc3339(end)
-        span_s = int((t_end - t_start).total_seconds())
-        if span_s <= 0:
-            raise HTTPException(
-                status_code=400,
-                detail=f"end ({end}) must be after start ({start})",
-            )
-        return {
-            "range": f"{span_s}s",
-            "anchor_epoch": t_end.timestamp(),
-            "label": f"{start} -> {end} ({span_s}s)",
-        }
-    # relative fallback — unchanged Phase 6 behaviour
-    return {"range": window, "anchor_epoch": None, "label": f"last {window}"}
+    if not start:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "start is required (RFC3339, e.g. 2026-08-07T04:00:00Z). "
+                "There is no relative-window fallback - a diagnosis without "
+                "a real incident start time is a guess, not a finding. "
+                "end is optional and defaults to now, for an incident that "
+                "is still ongoing."
+            ),
+        )
+    t_start = _parse_rfc3339(start)
+    t_end = _parse_rfc3339(end) if end else datetime.now(timezone.utc)
+    span_s = int((t_end - t_start).total_seconds())
+    if span_s <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"end ({end or 'now'}) must be after start ({start})",
+        )
+    end_label = end or "now"
+    return {
+        "range": f"{span_s}s",
+        "anchor_epoch": t_end.timestamp(),
+        "label": f"{start} -> {end_label} ({span_s}s)",
+    }
 
 
 # ─────────────────────────────────────────────
@@ -248,7 +260,7 @@ def correlate_change_points(findings: dict, tolerance_s: float = 20.0) -> list:
     return correlated
 
 
-async def collect_dash0_timeseries_signals(win: dict, service: str) -> dict:
+async def collect_dash0_timeseries_signals(win: dict, source: str, destination: str) -> dict:
     """Collect genuine time-series signals and run change-point detection on
     each. Called ONLY on the fault-diagnosis path, after the (cheap, scalar)
     deterministic gate has already decided something needs investigating -
@@ -258,6 +270,10 @@ async def collect_dash0_timeseries_signals(win: dict, service: str) -> dict:
     Each query uses a fixed 30s sub-window for increase(), independent of
     the overall diagnose window, so change-point resolution stays
     consistent whether the incident window is 1 minute or 15.
+
+    `source`/`destination` are the topology hint from the caller (e.g. APM
+    naming which edge it suspects) - no longer hardcoded to gateway/
+    product-svc, per the input-contract redesign.
     """
     metric_queries = {
         "hubble_drop_policy_deny": (
@@ -267,13 +283,13 @@ async def collect_dash0_timeseries_signals(win: dict, service: str) -> dict:
             'sum(increase(hubble_drop_total{reason="UNSUPPORTED_L3_PROTOCOL"}[30s]))'
         ),
         "obi_network_flow_bytes": (
-            f'sum(increase(obi_network_flow_bytes{{k8s_src_owner_name="{service}",'
-            f'k8s_dst_owner_name="product-svc",k8s_dst_owner_type="Service"}}[30s]))'
+            f'sum(increase(obi_network_flow_bytes{{k8s_src_owner_name="{source}",'
+            f'k8s_dst_owner_name="{destination}"}}[30s]))'
         ),
         "obi_tcp_failed_connections": (
-            f'sum(increase(obi_stat_tcp_failed_connections{{k8s_src_owner_name="{service}"}}[30s]))'
+            f'sum(increase(obi_stat_tcp_failed_connections{{k8s_src_owner_name="{source}"}}[30s]))'
         ),
-        "product_svc_spans": (
+        "destination_spans": (
             # telemetry_distro_name, not telemetry_sdk_name: confirmed live
             # that OBI's own eBPF spans ALSO report telemetry_sdk_name=
             # "opentelemetry" (mimicking the standard SDK's naming), so that
@@ -281,7 +297,7 @@ async def collect_dash0_timeseries_signals(win: dict, service: str) -> dict:
             # it happened to work only because both existed simultaneously
             # before SDK removal. telemetry_distro_name=
             # "opentelemetry-ebpf-instrumentation" is OBI-specific.
-            'sum(increase(dash0_spans_total{service_name="product-svc",'
+            f'sum(increase(dash0_spans_total{{service_name="{destination}",'
             'telemetry_distro_name="opentelemetry-ebpf-instrumentation"}[30s]))'
         ),
         "http_5xx_count": (
@@ -306,13 +322,16 @@ async def collect_dash0_timeseries_signals(win: dict, service: str) -> dict:
     return findings
 
 
-async def collect_dash0_signals(win: dict, service: str) -> dict:
+async def collect_dash0_signals(win: dict, source: str, destination: str) -> dict:
     """Collect signals from Dash0 Prometheus API.
 
     `win` is the dict returned by resolve_window(): {range, anchor_epoch, label}.
     Every PromQL expression below carries a `[RANGE]` placeholder (filled with the
     range duration) immediately followed by `[RANGE_END]` (filled with the
     ` @ <epoch>` anchor, or empty in relative mode).
+
+    `source`/`destination` are the topology hint from the caller - no longer
+    hardcoded to gateway/product-svc, per the input-contract redesign.
     """
     signals = {}
 
@@ -361,42 +380,35 @@ async def collect_dash0_signals(win: dict, service: str) -> dict:
         (signals["http_5xx_count"] / http_total * 100) if http_total > 0 else 0.0, 1
     )
 
-    # Network flow bytes (Beyla NetO11y, gateway → product-svc)
-    flow = await query_dash0(
-        f'sum(increase(beyla_network_flow_bytes{{k8s_src_owner_name="{service}"}}[RANGE][RANGE_END]))',
-        win,
-    )
-    signals["network_flow_bytes"] = round(float(flow[0]["value"][1]), 2) if flow else 0.0
-
     # ── Phase 7 additions ───────────────────────────────────────────────
 
-    # OBI NetO11y — network flow bytes (gateway → product-svc Service)
+    # OBI NetO11y — network flow bytes (source → destination)
     obi_flow = await query_dash0(
-        f'sum(increase(obi_network_flow_bytes{{k8s_src_owner_name="{service}",'
-        f'k8s_dst_owner_name="product-svc",k8s_dst_owner_type="Service"}}[RANGE][RANGE_END]))',
+        f'sum(increase(obi_network_flow_bytes{{k8s_src_owner_name="{source}",'
+        f'k8s_dst_owner_name="{destination}"}}[RANGE][RANGE_END]))',
         win,
     )
     signals["obi_network_flow_bytes"] = round(float(obi_flow[0]["value"][1]), 2) if obi_flow else 0.0
 
-    # OBI StatsO11y — TCP failed connections from the source service
+    # OBI StatsO11y — TCP failed connections from the source
     obi_tcp_failed = await query_dash0(
-        f'sum(increase(obi_stat_tcp_failed_connections{{k8s_src_owner_name="{service}"}}[RANGE][RANGE_END]))',
+        f'sum(increase(obi_stat_tcp_failed_connections{{k8s_src_owner_name="{source}"}}[RANGE][RANGE_END]))',
         win,
     )
     signals["obi_tcp_failed_connections"] = round(float(obi_tcp_failed[0]["value"][1]), 2) if obi_tcp_failed else 0.0
 
-    # AppO11y — product-svc spans (drops to zero during fault). Sourced from
+    # AppO11y — destination spans (drops to zero during fault). Sourced from
     # OBI's own eBPF traces now (telemetry_distro_name, not telemetry_sdk_name
     # - the latter never actually distinguished OBI spans from app-SDK ones,
     # see collect_dash0_timeseries_signals for detail). Also fixes a stale
     # metric name (dash0_spans -> dash0_spans_total, confirmed empirically
     # earlier this session that the former doesn't exist).
     spans = await query_dash0(
-        'sum(increase(dash0_spans_total{service_name="product-svc",'
+        f'sum(increase(dash0_spans_total{{service_name="{destination}",'
         'telemetry_distro_name="opentelemetry-ebpf-instrumentation"}[RANGE][RANGE_END]))',
         win,
     )
-    signals["product_svc_spans"] = round(float(spans[0]["value"][1]), 2) if spans else 0.0
+    signals["destination_spans"] = round(float(spans[0]["value"][1]), 2) if spans else 0.0
 
     signals["backend"] = "dash0"
     signals["window"] = win["label"]
@@ -485,14 +497,15 @@ async def collect_dynatrace_signals(win: dict, service: str) -> dict:
 # ─────────────────────────────────────────────
 
 SIGNAL_DESCRIPTIONS = {
-    "hubble_drop_policy_deny": "packets dropped by a Cilium network policy (L3/L4 access control decision) - SCOPED to this service pair only",
-    "hubble_drop_unsupported_l3": "packets dropped because the datapath doesn't support that L3 protocol (e.g. stray IPv6/multicast) - NOT a policy decision, and this signal is CLUSTER-WIDE/unscoped, not specific to this service pair. It can be triggered by unrelated traffic anywhere in the cluster, so a correlated-in-time shift here is weaker evidence than a shift in a signal that's actually scoped to gateway/product-svc.",
-    "obi_network_flow_bytes": f"bytes on the wire from gateway toward product-svc (eBPF-observed) - SCOPED to this service pair only",
-    "obi_tcp_failed_connections": "TCP handshakes from gateway that failed to complete (eBPF-observed) - SCOPED to this service pair only",
-    "product_svc_spans": "application spans emitted by product-svc's own OTel SDK - reflects whether requests actually reached and were processed by the service - SCOPED to this service pair only",
-    "http_5xx_count": "HTTP 5xx server error responses returned by gateway",
+    "hubble_drop_policy_deny": "packets dropped by a Cilium network policy (L3/L4 access control decision) - SCOPED to this source/destination pair only",
+    "hubble_drop_unsupported_l3": "packets dropped because the datapath doesn't support that L3 protocol (e.g. stray IPv6/multicast) - NOT a policy decision, and this signal is CLUSTER-WIDE/unscoped, not specific to this pair. It can be triggered by unrelated traffic anywhere in the cluster, so a correlated-in-time shift here is weaker evidence than a shift in a signal that's actually scoped to this source/destination pair.",
+    "obi_network_flow_bytes": "bytes on the wire from source toward destination (eBPF-observed) - SCOPED to this pair only",
+    "obi_tcp_failed_connections": "TCP handshakes from the source that failed to complete (eBPF-observed) - SCOPED to this pair only",
+    "destination_spans": "application spans emitted by the destination's own eBPF-observed traces - reflects whether requests actually reached and were processed by the destination - SCOPED to this pair only",
+    "http_5xx_count": "HTTP 5xx server error responses returned by the source",
     "cilium_policy_change_event": "CHANGE RECORD, not a symptom: a count of Cilium's own audit-trail log lines ('Imported CiliumNetworkPolicy' / 'Deleted CiliumNetworkPolicy'), captured directly from cilium-agent's logs. Every other signal in this analysis is a symptom - a downstream metric shift. This one is the actual event that could have CAUSED those shifts. A change point here landing at the same time as the symptom signals is direct evidence of causation, not just correlation - weight it much more heavily than any symptom-only correlation.",
 }
+
 
 
 def _format_finding(name: str, f: dict) -> str:
@@ -510,7 +523,7 @@ def _format_finding(name: str, f: dict) -> str:
     )
 
 
-def build_prompt(signals: dict, service: str, backend: str, findings: dict | None = None) -> str:
+def build_prompt(signals: dict, source: str, destination: str, backend: str, findings: dict | None = None) -> str:
     backend_context = ""
 
     if backend == "dash0" and findings:
@@ -568,9 +581,9 @@ over the whole window (no per-signal timing available):
 - hubble_drop_total (POLICY_DENY + POLICY_DENIED): {signals.get('hubble_drop_total_policy_deny', 0)}
 - hubble_drop_total (UNSUPPORTED_L3_PROTOCOL): {signals.get('hubble_drop_total_unsupported_l3_protocol', 0)}
 - HTTP 5xx errors: {signals.get('http_5xx_count', 0)}
-- OBI network flow bytes {service}→product-svc: {signals.get('obi_network_flow_bytes', 0)} bytes
-- OBI TCP failed connections from {service}: {signals.get('obi_tcp_failed_connections', 0)}
-- product-svc spans emitted: {signals.get('product_svc_spans', 0)}
+- OBI network flow bytes {source}→{destination}: {signals.get('obi_network_flow_bytes', 0)} bytes
+- OBI TCP failed connections from {source}: {signals.get('obi_tcp_failed_connections', 0)}
+- {destination} spans emitted: {signals.get('destination_spans', 0)}
 """
 
     elif backend == "dynatrace":
@@ -589,23 +602,26 @@ SIGNALS FROM DYNATRACE DAVIS AI + PROBLEMS API v2 ({signals.get('window','last 5
 microservices incident. Do not assume the cause in advance - reason from the
 evidence to a conclusion, the way a human on-call engineer would.
 
-ARCHITECTURE:
-- gateway (port 8000) → product-svc (port 8001) → postgres (port 5432)
-- gateway (port 8000) → llm-svc (port 8002) → AWS Bedrock
+INCIDENT SCOPE:
+- Suspected edge: {source} → {destination} (the topology hint supplied by
+  the caller - not assumed, this is the specific pair reported as affected)
 - Cilium CNI enforces network policy on this cluster; Hubble provides network
-  visibility; eBPF instrumentation (OBI) provides TCP/network metrics
-  independent of application code; product-svc's own OTel SDK emits spans
-  when it actually processes a request
+  visibility; eBPF instrumentation (OBI) provides TCP/network metrics and
+  traces independent of any application code
 - Monitoring backend: {backend.upper()}
 
 {backend_context}
 
 CANDIDATE CATEGORIES TO CONSIDER (not exhaustive, not ranked - weigh each
 against the evidence above before concluding):
-- Network policy blocking traffic between services
+- Network policy blocking traffic between {source} and {destination}
 - A datapath/protocol-level issue unrelated to policy (e.g. unsupported L3 protocol)
-- Application-level failure in gateway or product-svc itself (crash, exception, bad deploy)
-- Database (postgres) unavailability or slowness
+- Application-level failure in {source} or {destination} itself (crash, exception, bad deploy) -
+  NOTE: this system has no visibility into application code or logic by design
+  (network-team scope, zero app-code cooperation) - it can only say whether
+  network-observable symptoms of this are present (e.g. destination stops
+  producing spans), not confirm an app-level cause directly
+- Destination unavailability or slowness
 - Resource exhaustion (CPU/memory throttling, connection pool exhaustion)
 - DNS or service-discovery failure
 - Something not in this list, if the evidence points elsewhere
@@ -651,7 +667,7 @@ def healthy_path_check(signals: dict, backend: str) -> dict | None:
             "evidence": [
                 f"hubble_drop_total (POLICY_DENY): {drops} — no packets being denied",
                 f"OBI TCP failed connections: {tcp_failed} — no failing handshakes",
-                f"product-svc spans emitted: {signals.get('product_svc_spans', 0)}",
+                f"destination spans emitted: {signals.get('destination_spans', 0)}",
             ],
             "recommendation": "No action required. System is operating normally for this window.",
             "severity": "none",
@@ -770,10 +786,10 @@ Recommend the best product and explain why in 2-3 sentences."""
 
 @app.get("/diagnose")
 async def diagnose(
-    window: str = "5m",
-    start: str | None = None,
+    start: str,
+    source: str,
+    destination: str,
     end: str | None = None,
-    service: str = "gateway",
     backend: str = "dash0"
 ):
     """
@@ -781,12 +797,20 @@ async def diagnose(
     ?backend=dash0     → queries Dash0 Prometheus API (default)
     ?backend=dynatrace → queries Dynatrace Problems API v2 + Davis AI
 
-    Time window (two modes):
-    ?window=5m                              → relative, last 5 minutes (default)
-    ?start=2026-06-22T17:56:52Z&end=...Z    → absolute window (exact incident span)
+    Input contract (deliberately prescriptive, not a shot in the dark):
+    ?start=2026-08-07T04:00:00Z   → REQUIRED. No relative-window fallback -
+                                     a diagnosis without a real incident
+                                     start time is a guess, not a finding.
+    ?end=2026-08-07T04:05:00Z     → optional, defaults to now (for an
+                                     incident that's still ongoing)
+    ?source=gateway&destination=product-svc → REQUIRED. The topology hint:
+                                     which edge is suspected. No default -
+                                     silently defaulting to some assumed
+                                     pair is the same "shot in the dark"
+                                     problem as a missing start time.
     """
     # Resolve the window first so failures here return 400, not 500
-    win = resolve_window(window, start, end)
+    win = resolve_window(start, end)
 
     t0 = time.time()
 
@@ -794,11 +818,11 @@ async def diagnose(
     if backend == "dynatrace":
         if not DT_API_TOKEN:
             raise HTTPException(status_code=400, detail="DT_API_TOKEN not configured")
-        signals = await collect_dynatrace_signals(win, service)
+        signals = await collect_dynatrace_signals(win, source)
     elif backend == "dash0":
         if not DASH0_AUTH_TOKEN:
             raise HTTPException(status_code=400, detail="DASH0_AUTH_TOKEN not configured")
-        signals = await collect_dash0_signals(win, service)
+        signals = await collect_dash0_signals(win, source, destination)
     else:
         raise HTTPException(status_code=400, detail=f"Unknown backend: {backend}. Use dash0 or dynatrace")
 
@@ -809,17 +833,19 @@ async def diagnose(
         total_ms = round((time.time() - t0) * 1000, 1)
         log.info(
             f"diagnose_complete backend={backend} window={win['label']} "
+            f"source={source} destination={destination} "
             f"root_cause={healthy['root_cause']} healthy_path=true total_ms={total_ms} "
             f"hubble_drop_total_policy_deny={signals.get('hubble_drop_total_policy_deny', 0)} "
             f"obi_tcp_failed_connections={signals.get('obi_tcp_failed_connections', 0)} "
-            f"product_svc_spans={signals.get('product_svc_spans', 0)}"
+            f"destination_spans={signals.get('destination_spans', 0)}"
         )
         return {
             "backend": backend,
             "window": win["label"],
             "window_range": win["range"],
             "window_absolute": win["anchor_epoch"] is not None,
-            "service": service,
+            "source": source,
+            "destination": destination,
             "signals": signals,
             "diagnosis": healthy,
             "model": "none (deterministic healthy-path)",
@@ -834,11 +860,11 @@ async def diagnose(
     # reached when it's actually needed.
     findings = None
     if backend == "dash0":
-        findings = await collect_dash0_timeseries_signals(win, service)
+        findings = await collect_dash0_timeseries_signals(win, source, destination)
         log.info(f"diagnose_correlated_signals signals={','.join(findings.get('_correlated_signals', []))}")
 
     # Build prompt and call Bedrock
-    prompt = build_prompt(signals, service, backend, findings=findings)
+    prompt = build_prompt(signals, source, destination, backend, findings=findings)
     result = call_bedrock(prompt)
 
     total_ms = round((time.time() - t0) * 1000, 1)
@@ -849,7 +875,7 @@ async def diagnose(
             f"http_error_rate_pct={signals.get('http_error_rate_pct', 0)} "
             f"obi_network_flow_bytes={signals.get('obi_network_flow_bytes', 0)} "
             f"obi_tcp_failed_connections={signals.get('obi_tcp_failed_connections', 0)} "
-            f"product_svc_spans={signals.get('product_svc_spans', 0)}"
+            f"destination_spans={signals.get('destination_spans', 0)}"
         )
     elif backend == "dynatrace":
         log.info(
@@ -859,6 +885,7 @@ async def diagnose(
 
     log.info(
         f"diagnose_complete backend={backend} window={win['label']} "
+        f"source={source} destination={destination} "
         f"root_cause={result['diagnosis'].get('root_cause','')} "
         f"confidence={result['diagnosis'].get('confidence','')} "
         f"total_ms={total_ms}"
@@ -869,7 +896,8 @@ async def diagnose(
         "window": win["label"],
         "window_range": win["range"],
         "window_absolute": win["anchor_epoch"] is not None,
-        "service": service,
+        "source": source,
+        "destination": destination,
         "signals": signals,
         "timeseries_findings": findings,
         "diagnosis": result["diagnosis"],
