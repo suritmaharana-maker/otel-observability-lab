@@ -562,6 +562,30 @@ SIGNAL_DESCRIPTIONS = {
     "cilium_policy_change_event": "CHANGE RECORD, not a symptom: a count of Cilium's own audit-trail log lines ('Imported CiliumNetworkPolicy' / 'Deleted CiliumNetworkPolicy'), captured directly from cilium-agent's logs. Every other signal in this analysis is a symptom - a downstream metric shift. This one is the actual event that could have CAUSED those shifts. A change point here landing at the same time as the symptom signals is direct evidence of causation, not just correlation - weight it much more heavily than any symptom-only correlation.",
 }
 
+# What each signal SHOULD do, directionally, if "a policy is blocking traffic
+# between source and destination" is actually the correct root cause. This is
+# encoded as explicit facts, not left for the LLM to infer, because the LLM
+# has already been observed citing a signal as supporting evidence purely
+# because it correlated in TIME, without checking whether its DIRECTION
+# actually fits the claimed cause (destination_spans increasing was cited as
+# evidence for a traffic-blocking policy, when an increase is the opposite
+# of what blocked traffic should produce - spans should collapse toward
+# zero, not rise from it).
+#
+# Not every signal has a confidently known direction: obi_network_flow_bytes
+# was empirically found THIS SESSION to sometimes INCREASE during a real
+# policy block (SYN-retry storms from the blocked client can outweigh the
+# lost payload bytes of successful requests) - so its direction is marked
+# ambiguous rather than asserted, to avoid encoding a rule we've already
+# disproved with real data.
+EXPECTED_DIRECTION_IF_POLICY_BLOCK = {
+    "hubble_drop_policy_deny": "increase - a block should show MORE policy-deny drops",
+    "obi_tcp_failed_connections": "increase - blocked handshakes should show as MORE TCP failures",
+    "destination_spans": "decrease toward zero - if destination is blocked, it should stop processing requests and stop emitting spans. An INCREASE here is evidence AGAINST a full block, not for one.",
+    "http_5xx_count": "increase - though may stay near zero if failures manifest as client-side timeouts (499) rather than a clean server error (see this session's own finding on this)",
+    "obi_network_flow_bytes": "AMBIGUOUS - can increase (SYN-retry storms during a block) or decrease (fewer completed requests). Do not treat a shift in either direction alone as strong evidence for or against a block; use it only in combination with the other signals.",
+}
+
 
 
 def _format_finding(name: str, f: dict) -> str:
@@ -605,6 +629,10 @@ def build_prompt(signals: dict, source: str, destination: str, backend: str, fin
             f"(evidence they may share a root cause): {', '.join(correlated) if correlated else 'none - no two signals shifted at the same time'}"
         )
 
+        direction_table = "\n".join(
+            f"- {name}: {desc}" for name, desc in EXPECTED_DIRECTION_IF_POLICY_BLOCK.items()
+        )
+
         backend_context = f"""
 TIME-SERIES CHANGE-POINT ANALYSIS ({findings.get('window','last 5m')}):
 Each signal below was analyzed as a real time series (not a single aggregated
@@ -627,7 +655,21 @@ symptoms shifting together.
 Signals with NO detected change are evidence AGAINST that layer being
 involved. A signal shifting alone, uncorrelated with any other signal, is
 weaker evidence than a cluster of signals shifting together.
+
+DIRECTION CHECK - REQUIRED for every signal you cite as evidence, not just
+timing correlation. Two signals can shift at the exact same moment for
+completely different reasons - correlation in TIME is necessary but not
+sufficient. If your root cause is "a policy is blocking traffic", each
+signal you cite must ALSO move in the direction that a real block would
+produce:
+{direction_table}
+Before citing a signal as evidence, check its actual direction (above,
+per-signal) against this table. If a signal moved in the WRONG direction
+for your hypothesis, do not cite it as supporting evidence - either explain
+why it's still consistent, or note it as a contradiction and lower your
+confidence accordingly.
 """
+
 
     elif backend == "dash0":
         # Fallback: no findings supplied, use the plain scalar signals.
