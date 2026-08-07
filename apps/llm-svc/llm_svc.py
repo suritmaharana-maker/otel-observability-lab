@@ -338,10 +338,6 @@ async def collect_dash0_timeseries_signals(win: dict, source: str, destination: 
         "hubble_drop_unsupported_l3": (
             'sum(increase(hubble_drop_total{reason="UNSUPPORTED_L3_PROTOCOL"}[30s]))'
         ),
-        "obi_network_flow_bytes": (
-            f'sum(increase(obi_network_flow_bytes{{k8s_src_owner_name="{source}",'
-            f'k8s_dst_owner_name="{destination}"}}[30s]))'
-        ),
         "obi_tcp_failed_connections": (
             f'sum(increase(obi_stat_tcp_failed_connections{{k8s_src_owner_name="{source}"}}[30s]))'
         ),
@@ -438,13 +434,17 @@ async def collect_dash0_signals(win: dict, source: str, destination: str) -> dic
 
     # ── Phase 7 additions ───────────────────────────────────────────────
 
-    # OBI NetO11y — network flow bytes (source → destination)
-    obi_flow = await query_dash0(
-        f'sum(increase(obi_network_flow_bytes{{k8s_src_owner_name="{source}",'
-        f'k8s_dst_owner_name="{destination}"}}[RANGE][RANGE_END]))',
-        win,
-    )
-    signals["obi_network_flow_bytes"] = round(float(obi_flow[0]["value"][1]), 2) if obi_flow else 0.0
+    # NOTE: obi_network_flow_bytes deliberately NOT collected as a
+    # diagnostic signal here. Confirmed empirically this session that its
+    # direction during a real fault is genuinely ambiguous (can increase
+    # via SYN-retry storms or decrease from fewer completed requests) -
+    # an ambiguous signal in the LLM's evidence set is pure risk with no
+    # reliable diagnostic value, since it relies on the LLM correctly
+    # following a "don't cite this alone" caveat every time rather than
+    # a guarantee. Its only validated, reliable use is the binary
+    # existence check in validate_topology_edge() - "does any traffic
+    # exist between this pair at all" doesn't need direction, just
+    # presence.
 
     # OBI StatsO11y — TCP failed connections from the source
     obi_tcp_failed = await query_dash0(
@@ -555,7 +555,6 @@ async def collect_dynatrace_signals(win: dict, service: str) -> dict:
 SIGNAL_DESCRIPTIONS = {
     "hubble_drop_policy_deny": "packets dropped by a Cilium network policy (L3/L4 access control decision) - SCOPED to this source/destination pair only",
     "hubble_drop_unsupported_l3": "packets dropped because the datapath doesn't support that L3 protocol (e.g. stray IPv6/multicast) - NOT a policy decision, and this signal is CLUSTER-WIDE/unscoped, not specific to this pair. It can be triggered by unrelated traffic anywhere in the cluster, so a correlated-in-time shift here is weaker evidence than a shift in a signal that's actually scoped to this source/destination pair.",
-    "obi_network_flow_bytes": "bytes on the wire from source toward destination (eBPF-observed) - SCOPED to this pair only",
     "obi_tcp_failed_connections": "TCP handshakes from the source that failed to complete (eBPF-observed) - SCOPED to this pair only",
     "destination_spans": "application spans emitted by the destination's own eBPF-observed traces - reflects whether requests actually reached and were processed by the destination - SCOPED to this pair only",
     "http_5xx_count": "HTTP 5xx server error responses returned by the source",
@@ -572,18 +571,19 @@ SIGNAL_DESCRIPTIONS = {
 # of what blocked traffic should produce - spans should collapse toward
 # zero, not rise from it).
 #
-# Not every signal has a confidently known direction: obi_network_flow_bytes
-# was empirically found THIS SESSION to sometimes INCREASE during a real
-# policy block (SYN-retry storms from the blocked client can outweigh the
-# lost payload bytes of successful requests) - so its direction is marked
-# ambiguous rather than asserted, to avoid encoding a rule we've already
-# disproved with real data.
+# obi_network_flow_bytes is deliberately absent from this table (and from
+# the diagnostic signal set entirely, per Surit's call): empirically found
+# THIS SESSION to sometimes INCREASE during a real policy block (SYN-retry
+# storms from the blocked client can outweigh the lost payload bytes of
+# successful requests). Rather than mark it ambiguous and hope the LLM
+# reliably follows a "don't cite this alone" caveat every time, it's been
+# removed from the evidence set entirely - its only validated use now is
+# the binary existence check in validate_topology_edge().
 EXPECTED_DIRECTION_IF_POLICY_BLOCK = {
     "hubble_drop_policy_deny": "increase - a block should show MORE policy-deny drops",
     "obi_tcp_failed_connections": "increase - blocked handshakes should show as MORE TCP failures",
     "destination_spans": "decrease toward zero - if destination is blocked, it should stop processing requests and stop emitting spans. An INCREASE here is evidence AGAINST a full block, not for one.",
     "http_5xx_count": "increase - though may stay near zero if failures manifest as client-side timeouts (499) rather than a clean server error (see this session's own finding on this)",
-    "obi_network_flow_bytes": "AMBIGUOUS - can increase (SYN-retry storms during a block) or decrease (fewer completed requests). Do not treat a shift in either direction alone as strong evidence for or against a block; use it only in combination with the other signals.",
 }
 
 
@@ -679,7 +679,6 @@ over the whole window (no per-signal timing available):
 - hubble_drop_total (POLICY_DENY + POLICY_DENIED): {signals.get('hubble_drop_total_policy_deny', 0)}
 - hubble_drop_total (UNSUPPORTED_L3_PROTOCOL): {signals.get('hubble_drop_total_unsupported_l3_protocol', 0)}
 - HTTP 5xx errors: {signals.get('http_5xx_count', 0)}
-- OBI network flow bytes {source}→{destination}: {signals.get('obi_network_flow_bytes', 0)} bytes
 - OBI TCP failed connections from {source}: {signals.get('obi_tcp_failed_connections', 0)}
 - {destination} spans emitted: {signals.get('destination_spans', 0)}
 """
@@ -990,7 +989,6 @@ async def diagnose(
         log.info(
             f"diagnose_signals hubble_drop_total_policy_deny={signals.get('hubble_drop_total_policy_deny', 0)} "
             f"http_error_rate_pct={signals.get('http_error_rate_pct', 0)} "
-            f"obi_network_flow_bytes={signals.get('obi_network_flow_bytes', 0)} "
             f"obi_tcp_failed_connections={signals.get('obi_tcp_failed_connections', 0)} "
             f"destination_spans={signals.get('destination_spans', 0)}"
         )
