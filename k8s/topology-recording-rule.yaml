@@ -1,0 +1,35 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: topology-discovery
+  labels:
+    app: otel-observability-lab
+spec:
+  groups:
+    - name: topology
+      interval: 10m
+      rules:
+        # Workload-to-workload dependency graph, discovered from real eBPF
+        # flow data over a wide rolling baseline - deliberately
+        # decoupled from any single incident window. Computed once every
+        # 10 minutes and persisted as a cheap queryable metric, instead of
+        # every /diagnose call re-running an expensive aggregation.
+        #
+        # Window is 2h, not the originally-planned 24h: this cluster gets
+        # torn down and rebuilt frequently, and a fresh cluster has zero
+        # history - a 24h window would leave topology degraded/empty for
+        # up to a day after every rebuild. 2h is well under Dash0's 8h10m
+        # threshold (below which the 10m interval isn't even a required
+        # minimum, just a sane default for a slow-moving structural signal,
+        # not a fast-reacting one).
+        #
+        # Only carries workload-level identity (k8s owner name/type +
+        # namespace) - OBI's exported metrics do not carry port or L4
+        # protocol labels (confirmed empirically, not by design choice
+        # here), so this cannot distinguish multiple ports between the
+        # same two workloads. See OPEN_ISSUES.md.
+        - record: topology:edge_bytes:sum_rate2h
+          expr: |
+            sum by (k8s_src_owner_name, k8s_src_owner_type, k8s_src_namespace,
+                    k8s_dst_owner_name, k8s_dst_owner_type, k8s_dst_namespace)
+              (rate(obi_network_flow_bytes[2h]))
