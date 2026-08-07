@@ -712,6 +712,32 @@ def build_prompt(signals: dict, source: str, destination: str, backend: str, fin
 
         if policy_logs:
             log_lines = "\n".join(f"- {r['body']}" for r in policy_logs)
+            actions = {("Imported" if "Imported" in r["body"] else "Deleted" if "Deleted" in r["body"] else "unknown") for r in policy_logs}
+            if actions == {"Imported"}:
+                action_guidance = (
+                    "All entries above are IMPORTS (policy applied). This is an ONSET event: "
+                    "expect symptom signals to shift AWAY from healthy right after this timestamp "
+                    "(drops/failures INCREASE, spans DECREASE toward zero). If instead symptoms were "
+                    "already bad BEFORE this point and IMPROVE after it, this import is not the cause "
+                    "of the incident - do not conclude otherwise."
+                )
+            elif actions == {"Deleted"}:
+                action_guidance = (
+                    "All entries above are DELETIONS (policy removed). This is a RECOVERY event, the "
+                    "OPPOSITE of an onset: removing a block should RESTORE traffic, not break it. "
+                    "Expect symptom signals to IMPROVE after this timestamp (drops/failures DECREASE, "
+                    "spans INCREASE/resume). Do NOT conclude 'this deletion caused the traffic to be "
+                    "blocked' - that is backwards. If drops/failures were elevated BEFORE this deletion "
+                    "and the deletion is what's shown here, the correct story is that the policy was "
+                    "blocking traffic UNTIL this deletion, which then fixed it - the incident's onset "
+                    "must be an EARLIER, un-logged cause (or an Imported event outside this window)."
+                )
+            else:
+                action_guidance = (
+                    "Multiple different actions present (Imported and/or Deleted) - determine which "
+                    "specific action's timestamp actually lines up with the onset of bad symptoms, "
+                    "not just any policy-change event in the window."
+                )
             policy_log_section = f"""
 ACTUAL CHANGE-RECORD LOG CONTENT (not a count, the real audit-trail text,
 queried directly from Cilium's own logs for this window):
@@ -721,6 +747,9 @@ This is the strongest possible evidence available to this system: the literal
 record of what changed, when, and to which object. If a root cause is
 supported by one of these lines, cite the SPECIFIC policy name and action
 (Imported/Deleted) from the text above, not just "a policy changed."
+
+DIRECTIONAL MEANING OF THIS ACTION - REQUIRED READING before concluding:
+{action_guidance}
 """
         else:
             policy_log_section = (
