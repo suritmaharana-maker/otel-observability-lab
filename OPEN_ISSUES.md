@@ -55,8 +55,63 @@ the way otelcol's connections show both directions cleanly.
 
 ## OPEN ISSUE: hubble_drop_total POLICY_DENY/POLICY_DENIED not being recorded
 
-Status: unresolved. Cilium restart attempted, did not fix it.
-Date found: 2026-08-06
+Status: root cause substantially narrowed (2026-08-08), still
+unresolved. Was NOT a Hubble reliability bug as originally framed.
+Date found: 2026-08-06. Updated: 2026-08-08.
+
+### UPDATE 2026-08-08 - the real finding
+
+Every earlier test in this issue queried the WRONG cilium-agent pod.
+Cilium enforces policy per-node; the DaemonSet's label selector
+(`daemonset/cilium` or `-l k8s-app=cilium`) picks whichever pod
+happens to be first, which is essentially arbitrary and was never
+guaranteed to be the node actually enforcing the specific policy
+under test. That single methodology error explains every "nothing
+at all, not even at the raw monitor level" result recorded below
+from 2026-08-06.
+
+Retested today by first checking which node gateway and product-svc
+actually run on, then targeting the CORRECT cilium-agent (the one on
+product-svc's node, since our fault is an ingress policy on
+product-svc):
+- `cilium-dbg monitor --type drop` on the correct node: shows real,
+  repeated "drop (Policy denied by denylist)" events immediately.
+- `hubble observe --verdict DROPPED` on the correct node: also shows
+  the same drops clearly, reason text "Policy denied by denylist".
+- So the drops are 100% genuinely happening AND genuinely captured
+  by both Cilium's raw eBPF monitor and Hubble's own flow-observation
+  layer. Nothing is broken at that level - this directly contradicts
+  the original "not an otelcol issue, not a broken fault, the gap is
+  in Hubble's flow capture itself" conclusion below, which was based
+  on monitoring the wrong node.
+
+BUT: hubble_drop_total (the EXPORTED PROMETHEUS METRIC) still shows
+NOTHING for this drop, under any reason string, even seconds after
+the confirmed-real drop. Tested two rule types to isolate why:
+- fault-block-gateway (ingressDeny, Cilium's explicit deny-rule
+  feature): raw reason "Policy denied by denylist" - not counted.
+- A second, disposable test policy using a standard allow-list
+  `ingress` rule (implicit deny via an unmatched fromEndpoints
+  selector): raw reason changes to plain "Policy denied" - ALSO not
+  counted in the metric.
+
+This rules out "ingressDeny specifically is unsupported by the
+metrics exporter" - the gap is broader: ANY policy-verdict-based drop
+(denylist or standard allow-list) fails to reach hubble_drop_total,
+while non-policy datapath drops (UNSUPPORTED_L3_PROTOCOL) export
+correctly and consistently. The gap is specifically between Hubble's
+flow-observation layer (works, confirmed) and its metrics-export
+layer (fails, confirmed) - for policy-verdict reasons only.
+
+Also checked and ruled out: cilium-agent's own native metrics
+(typically port 9962, would give an independent counter bypassing
+Hubble's flow-log path entirely) is not listening/enabled in our
+config at all - not an available cross-check without enabling a new
+cilium-agent flag, a bigger change than attempted today.
+
+### Original findings below (2026-08-06) - now understood to be
+### artifacts of monitoring the wrong node, not evidence of a genuine
+### capture failure. Kept for the record.
 
 ### Expected behavior
 When a CiliumNetworkPolicy blocks traffic (ingressDeny), Hubble should
@@ -118,15 +173,28 @@ used successfully in /diagnose testing).
   listening/exposed as configured; container only declares health
   (9879), peer-service (4244), and hubble-metrics (9965) ports.
 
-### Next step when resumed
-1. `cilium-dbg policy trace` for a live gateway->product-svc flow
-   during an active fault, to see Cilium's own verdict computation
-   directly rather than inferring from Hubble's output.
-2. Check monitor-aggregation config explicitly (`cilium-dbg config`
-   or the live daemonset's flags/helm values).
-3. Find cilium-agent's actual metrics port/config if native metrics
-   are enabled at all, to get an independent counter to compare
-   against Hubble's flow-log-derived one.
+### Next step when resumed (updated 2026-08-08)
+1. Check hubble.metrics context-option config for `drop` specifically
+   - it's currently enabled with zero options (bare `- drop` in
+     helm/cilium-values.yaml). Cilium's docs confirm context options
+     are supported for all metrics; unclear if there's a relevant one
+     for policy-verdict counting specifically, but not yet checked.
+2. Check Cilium's own GitHub issues for known bugs/limitations in the
+   hubble_drop_total metrics-export path specifically for
+   policy-verdict reasons (not yet searched with this precise framing
+   - prior searches were framed around monitor-aggregation and buffer
+   state, both now ruled out).
+3. If no config fix exists, consider enabling cilium-agent's own
+   native /metrics (port 9962, not currently listening/enabled) as an
+   independent counter, to confirm whether this is genuinely a
+   Hubble-specific metrics gap or something deeper in cilium-agent's
+   own metrics subsystem.
+4. Given /diagnose's Tier 1 (real Cilium policy-change LOG content,
+   added 2026-08-07) already gives a reliable, working signal for
+   "was a policy applied/removed," hubble_drop_total's policy-deny
+   count is now a less critical gap than when this issue was first
+   opened - Tier 1 covers the core "did a policy change happen"
+   question independently of this metric.
 
 
 ---
