@@ -67,6 +67,15 @@ data:
           - type: filter
             id: policy-events-only
             expr: 'not (body matches "CiliumNetworkPolicy")'
+          - type: regex_parser
+            id: extract-level
+            regex: 'level=(?P<level>\S+)'
+            parse_from: body
+            parse_to: attributes
+            on_error: send
+          - type: severity_parser
+            id: set-severity
+            parse_from: attributes.level
     
     processors:
       memory_limiter:
